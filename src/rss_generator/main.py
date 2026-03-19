@@ -4,9 +4,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
@@ -56,10 +56,19 @@ app = FastAPI(
 # CORS for local React dev server (Vite on port 5173)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", "https://www.rss-feeder.win"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def restrict_external_to_feeds(request: Request, call_next):
+    """Block external (Cloudflare-proxied) requests to anything except /feed/* paths."""
+    is_external = "cf-connecting-ip" in request.headers
+    if is_external and not request.url.path.startswith("/feed/"):
+        return Response(status_code=404)
+    return await call_next(request)
 
 # API routes mounted under /api
 app.include_router(feeds_router.router, prefix="/api")
