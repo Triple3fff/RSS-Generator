@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command \"node --version; npm --version\" 2>&1)"
+    ]
+  }
+}

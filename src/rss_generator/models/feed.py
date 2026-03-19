@@ -1,0 +1,76 @@
+from datetime import datetime
+from typing import Optional
+from sqlmodel import Field, SQLModel, Relationship
+
+
+class FeedConfig(SQLModel, table=True):
+    __tablename__ = "feed_configs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    slug: str = Field(unique=True, index=True, description="URL-safe identifier used in /feed/{slug}.xml")
+    url: str = Field(description="The page URL to scrape")
+    title: str = Field(description="RSS channel title")
+    description: str = Field(default="", description="RSS channel description")
+
+    # CSS selectors (relative to page root)
+    selector_item: str = Field(description="CSS selector for repeating item containers (e.g. 'article.post')")
+    selector_title: str = Field(description="CSS selector for title, relative to item container")
+    selector_link: str = Field(default="", description="CSS selector for link element (relative to item container). Empty = auto-detect first <a href>.")
+    selector_link_attr: str = Field(default="href", description="Attribute to extract from link element")
+    selector_description: Optional[str] = Field(default=None, description="CSS selector for description/summary")
+    selector_date: Optional[str] = Field(default=None, description="CSS selector for publication date")
+    selector_author: Optional[str] = Field(default=None, description="CSS selector for author name")
+    date_format: Optional[str] = Field(default=None, description="strptime format for date parsing (e.g. '%Y-%m-%d')")
+
+    # Scraping options
+    poll_interval_minutes: int = Field(default=60, description="How often to scrape this page (minutes)")
+    use_playwright: bool = Field(default=False, description="Use headless browser for JS-rendered pages")
+    keep_html: bool = Field(default=False, description="Preserve HTML tags in description (some readers render it)")
+    active: bool = Field(default=True, description="Whether this feed is actively scraped")
+
+    # State
+    last_scraped_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    items: list["FeedItem"] = Relationship(back_populates="feed_config")
+    scrape_logs: list["ScrapeLog"] = Relationship(back_populates="feed_config")
+
+
+class FeedItem(SQLModel, table=True):
+    __tablename__ = "feed_items"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    feed_config_id: int = Field(foreign_key="feed_configs.id", index=True)
+
+    guid: str = Field(index=True, description="Stable SHA-256 identifier for this item")
+    title: Optional[str] = Field(default=None)
+    link: Optional[str] = Field(default=None)
+    description: Optional[str] = Field(default=None)
+    author: Optional[str] = Field(default=None)
+    pub_date: Optional[datetime] = Field(default=None, description="Publication date from the page, if extracted")
+
+    content_hash: str = Field(description="SHA-256 of normalized content, used to detect updates")
+    is_new: bool = Field(default=True, description="True until first served in an RSS response")
+
+    discovered_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    feed_config: Optional[FeedConfig] = Relationship(back_populates="items")
+
+
+class ScrapeLog(SQLModel, table=True):
+    __tablename__ = "scrape_logs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    feed_config_id: int = Field(foreign_key="feed_configs.id", index=True)
+
+    success: bool
+    new_items: int = Field(default=0)
+    updated_items: int = Field(default=0)
+    unchanged_items: int = Field(default=0)
+    error_message: Optional[str] = Field(default=None)
+    duration_ms: Optional[int] = Field(default=None)
+    scraped_at: datetime = Field(default_factory=datetime.utcnow)
+
+    feed_config: Optional[FeedConfig] = Relationship(back_populates="scrape_logs")

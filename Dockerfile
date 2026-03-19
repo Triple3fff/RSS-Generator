@@ -1,0 +1,27 @@
+# ── Stage 1: Build React UI ──────────────────────────────────────────────────
+FROM node:20-alpine AS ui-builder
+WORKDIR /app/ui
+COPY ui/package.json ui/package-lock.json* ./
+RUN npm install
+COPY ui/ ./
+RUN npm run build
+
+# ── Stage 2: Python API ───────────────────────────────────────────────────────
+FROM python:3.11-slim AS final
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libxml2-dev libxslt-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml .
+COPY src/ src/
+RUN pip install --no-cache-dir -e .
+# Copy the built React app so FastAPI can serve it
+COPY --from=ui-builder /app/ui/dist ui/dist
+
+RUN mkdir -p data/feeds
+
+EXPOSE 8000
+
+CMD ["python", "-m", "rss_generator.main"]
