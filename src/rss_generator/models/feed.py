@@ -13,14 +13,25 @@ class FeedConfig(SQLModel, table=True):
     description: str = Field(default="", description="RSS channel description")
 
     # CSS selectors (relative to page root)
-    selector_item: str = Field(description="CSS selector for repeating item containers (e.g. 'article.post')")
-    selector_title: str = Field(description="CSS selector for title, relative to item container")
+    selector_item: str = Field(default="", description="CSS selector for repeating item containers (e.g. 'article.post')")
+    selector_title: str = Field(default="", description="CSS selector for title, relative to item container")
     selector_link: str = Field(default="", description="CSS selector for link element (relative to item container). Empty = auto-detect first <a href>.")
     selector_link_attr: str = Field(default="href", description="Attribute to extract from link element")
     selector_description: Optional[str] = Field(default=None, description="CSS selector for description/summary")
     selector_date: Optional[str] = Field(default=None, description="CSS selector for publication date")
     selector_author: Optional[str] = Field(default=None, description="CSS selector for author name")
+    selector_item_excluded: Optional[str] = Field(default=None, description="JSON array of link hrefs to exclude from selector_item results")
     date_format: Optional[str] = Field(default=None, description="strptime format for date parsing (e.g. '%Y-%m-%d')")
+
+    # XPath extraction mode (alternative to CSS selectors)
+    use_xpath: bool = Field(default=False, description="Use XPath expressions instead of CSS selectors")
+    xpath_item: Optional[str] = Field(default=None, description="XPath for repeating item containers (e.g. '//article')")
+    xpath_title: Optional[str] = Field(default=None, description="XPath for title, relative to container (e.g. './/h2')")
+    xpath_link: Optional[str] = Field(default=None, description="XPath for link element, relative to container (e.g. './/a'). Empty = auto-detect first <a href>.")
+    xpath_link_attr: str = Field(default="href", description="Attribute to extract from the XPath link element")
+    xpath_description: Optional[str] = Field(default=None, description="XPath for description, relative to container")
+    xpath_date: Optional[str] = Field(default=None, description="XPath for date element, relative to container")
+    xpath_author: Optional[str] = Field(default=None, description="XPath for author, relative to container")
 
     # Scraping options
     poll_interval_minutes: int = Field(default=60, description="How often to scrape this page (minutes)")

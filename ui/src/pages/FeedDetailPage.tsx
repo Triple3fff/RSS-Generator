@@ -129,7 +129,14 @@ export function FeedDetailPage() {
               selector_description: feed.selector_description ?? undefined,
               selector_date: feed.selector_date ?? undefined,
               selector_author: feed.selector_author ?? undefined,
+              selector_item_excluded: feed.selector_item_excluded ?? undefined,
               date_format: feed.date_format ?? undefined,
+              xpath_item: feed.xpath_item ?? undefined,
+              xpath_title: feed.xpath_title ?? undefined,
+              xpath_link: feed.xpath_link ?? undefined,
+              xpath_description: feed.xpath_description ?? undefined,
+              xpath_date: feed.xpath_date ?? undefined,
+              xpath_author: feed.xpath_author ?? undefined,
             }}
             onSubmit={handleUpdate}
             isLoading={updateMutation.isPending}

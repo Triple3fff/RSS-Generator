@@ -21,6 +21,7 @@ export function PreviewTable({ items }: PreviewTableProps) {
           <tr>
             <th className="px-4 py-2 text-left font-medium">Title</th>
             <th className="px-4 py-2 text-left font-medium">Description</th>
+            <th className="px-4 py-2 text-left font-medium">Author</th>
             <th className="px-4 py-2 text-left font-medium">Date</th>
           </tr>
         </thead>
@@ -49,6 +50,9 @@ export function PreviewTable({ items }: PreviewTableProps) {
                 ) : (
                   <span className="text-gray-400">—</span>
                 )}
+              </td>
+              <td className="whitespace-nowrap px-4 py-3 text-gray-500">
+                {item.author ?? '—'}
               </td>
               <td className="whitespace-nowrap px-4 py-3 text-gray-500">
                 {item.pub_date ? formatDateTime(item.pub_date) : '—'}

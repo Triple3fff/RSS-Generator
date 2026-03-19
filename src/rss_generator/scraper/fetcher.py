@@ -49,7 +49,10 @@ def _build_session() -> requests.Session:
 def fetch_page(url: str, use_playwright: bool = False) -> FetchResult:
     """Fetch a web page and return its HTML content."""
     if use_playwright:
-        return _fetch_with_playwright(url)
+        try:
+            return _fetch_with_playwright(url)
+        except RuntimeError as exc:
+            logger.warning("Playwright unavailable (%s), falling back to requests for %s", exc, url)
     return _fetch_with_requests(url)
 
 

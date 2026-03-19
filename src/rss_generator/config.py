@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # Feed defaults
     default_poll_interval_minutes: int = 60
-    max_items_per_feed: int = 50
+    max_items_per_feed: int = 200
 
     # HTTP scraping
     request_timeout_seconds: int = 30

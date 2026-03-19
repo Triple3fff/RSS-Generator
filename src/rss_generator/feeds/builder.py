@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timezone
 
 from feedgen.feed import FeedGenerator
+from sqlalchemy import nullslast
 from sqlmodel import Session, select
 
 from ..config import settings
@@ -15,7 +16,7 @@ def build_feed(session: Session, config: FeedConfig) -> bytes:
     items = session.exec(
         select(FeedItem)
         .where(FeedItem.feed_config_id == config.id)
-        .order_by(FeedItem.discovered_at.desc())  # type: ignore[arg-type]
+        .order_by(nullslast(FeedItem.pub_date.desc()), FeedItem.discovered_at.desc())  # type: ignore[arg-type]
         .limit(settings.max_items_per_feed)
     ).all()
 
@@ -29,6 +30,8 @@ def build_feed(session: Session, config: FeedConfig) -> bytes:
     fg.lastBuildDate(_utc_now())
 
     for item in items:
+        if not item.title and not item.link:
+            continue
         fe = fg.add_entry(order="append")
         fe.id(item.guid)
         fe.title(item.title or "(no title)")

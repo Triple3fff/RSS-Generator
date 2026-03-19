@@ -41,9 +41,18 @@ def detect_changes(session: Session, config: FeedConfig, raw_items: list[RawItem
     }
 
     report = ChangeReport()
+    seen_guids: set[str] = set()  # deduplicate within a single scrape run
 
     for raw in raw_items:
+        # Skip containers that yielded no meaningful content
+        if not raw.title and not raw.link:
+            continue
+
         guid = _make_guid(config.url, raw)
+        if guid in seen_guids:
+            continue
+        seen_guids.add(guid)
+
         content_hash = _make_content_hash(raw)
 
         if guid not in existing:

@@ -1,3 +1,4 @@
+import json
 import re
 from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import HTMLResponse
@@ -6,12 +7,17 @@ from ..scraper.fetcher import fetch_page
 
 router = APIRouter(tags=["picker"])
 
+# Injected before PICKER_SCRIPT when saved selectors are present.
+# {init_json} is replaced with a safe JSON literal.
+_INIT_SCRIPT = '<script>window.__RSS_INIT__={init_json};</script>\n'
+
 PICKER_SCRIPT = r"""
 <style id="__rss_picker_style">
   html { margin-top: 52px !important; }
   .__ph  { outline: 2px solid #f97316 !important; background: rgba(249,115,22,0.07) !important; }
-  .__phc { outline: 2px dashed #8b5cf6 !important; background: rgba(139,92,246,0.04) !important; }
-  .__phx { outline: 2px dashed #ef4444 !important; background: rgba(239,68,68,0.06) !important; opacity: 0.55; }
+  .__phc { outline: 2px dashed #8b5cf6 !important; background: rgba(139,92,246,0.08) !important; }
+  .__phx { outline: 2px dashed #ef4444 !important; background: rgba(239,68,68,0.10) !important; opacity: 0.55; }
+  .__phf { outline: 2px solid #22c55e !important; background: rgba(34,197,94,0.10) !important; }
   .__pm {
     position: fixed; background: #fff; border: 1px solid #e5e7eb;
     border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.18);
@@ -33,41 +39,48 @@ PICKER_SCRIPT = r"""
     font-family: system-ui,sans-serif; font-size: 12px; box-sizing: border-box;
     pointer-events: auto; flex-wrap: wrap;
   }
-  .__tb-title { font-weight: 700; color: #f97316; font-size: 13px; white-space: nowrap; }
-  .__tb-hint  { color: #9ca3af; font-size: 11px; flex: 1; }
+  .__tb-title  { font-weight: 700; color: #f97316; font-size: 13px; white-space: nowrap; }
+  .__tb-hint   { color: #9ca3af; font-size: 11px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .__tb-fields { display: flex; gap: 6px; flex-wrap: wrap; }
-  .__tb-f { font-size: 11px; }
+  .__tb-f      { font-size: 11px; }
   .__tb-f.done { color: #4ade80; }
   .__tb-f.auto { color: #60a5fa; }
   .__tb-f.pend { color: #6b7280; }
-  .__tb-apply  { padding: 4px 10px; background: #f97316; border: none; border-radius: 5px; color: #fff; cursor: pointer; font-weight: 600; font-size: 12px; white-space: nowrap; }
+  .__tb-show   { padding: 4px 10px; background: #065f46; border: 1px solid #059669; border-radius: 5px; color: #6ee7b7; cursor: pointer; font-size: 12px; white-space: nowrap; }
+  .__tb-save   { padding: 4px 10px; background: #f97316; border: none; border-radius: 5px; color: #fff; cursor: pointer; font-weight: 600; font-size: 12px; white-space: nowrap; }
   .__tb-cancel { padding: 4px 8px; background: #374151; border: 1px solid #4b5563; border-radius: 5px; color: #fff; cursor: pointer; font-size: 12px; }
   #__rss_ov { position: fixed; top: 52px; left: 0; right: 0; bottom: 0; z-index: 2147483645; cursor: crosshair; }
 </style>
 <script id="__rss_picker_script">
 (function() {
   /* ── State ── */
-  var sel = {};             // collected selectors
-  var container    = null;  // detected repeating item container DOM element
-  var containerSel = '';    // effective CSS selector (may include :not() exclusions)
-  var containerBase = '';   // base selector without :not() clauses
-  var excludedEls  = [];    // container DOM elements the user has manually deselected
+  var sel = {};
+  var container    = null;
+  var containerSel = '';
+  var containerBase = '';
+  var excludedEls  = [];
+  var manuallyIncluded = [];
+  var savedExcludedNths = [];  // nth-of-type indices from the stored :not() clauses
+  var _restoredEls = [];       // elements with restoration inline styles (for clearing)
+  var _highlightsShowing = false;
+  var _origContainerSel = '';       // original selector_item from init (may have :not() from old saves)
 
   var fields = [
-    { key: 'selector_item',        label: 'Item Container', icon: '▦',  req: true  },
-    { key: 'selector_title',       label: 'Title',          icon: 'T',  req: true  },
-    { key: 'selector_description', label: 'Description',    icon: '¶',  req: false },
-    { key: 'selector_date',        label: 'Date',           icon: '⏰', req: false },
-    { key: 'selector_author',      label: 'Author',         icon: '👤', req: false },
+    { key: 'selector_item',        label: 'Container',   icon: '▦',  req: true  },
+    { key: 'selector_title',       label: 'Title',       icon: 'T',  req: true  },
+    { key: 'selector_description', label: 'Description', icon: '¶',  req: false },
+    { key: 'selector_date',        label: 'Date',        icon: '⏰', req: false },
+    { key: 'selector_author',      label: 'Author',      icon: '👤', req: false },
   ];
 
   /* ── Toolbar ── */
   var tb = document.createElement('div'); tb.className = '__tb';
   tb.innerHTML =
     '<span class="__tb-title">RSS Picker</span>' +
-    '<span class="__tb-hint" id="__tb_hint">Click any article title to start</span>' +
+    '<span class="__tb-hint" id="__tb_hint">Click an element, then assign it</span>' +
     '<div class="__tb-fields" id="__tb_f"></div>' +
-    '<button class="__tb-apply" id="__tb_ok">Apply</button>' +
+    '<button class="__tb-show" id="__tb_show" style="display:none">◉ Previous Selections</button>' +
+    '<button class="__tb-save" id="__tb_ok">Save</button>' +
     '<button class="__tb-cancel" id="__tb_x">Cancel</button>';
   document.body.appendChild(tb);
 
@@ -75,13 +88,13 @@ PICKER_SCRIPT = r"""
     var hint = document.getElementById('__tb_hint');
     var fc   = document.getElementById('__tb_f');
     if (!container) {
-      hint.textContent = 'Click an article element and assign it as Item Container or Title';
+      hint.textContent = 'Click an article element and assign it as Container or Title';
       fc.innerHTML = '';
       return;
     }
     var cnt = 0;
     try { cnt = document.querySelectorAll(containerSel).length; } catch(e) {}
-    hint.textContent = '▦ ' + containerSel + ' (' + cnt + ' articles)' + (sel.selector_link ? '  🔗 auto' : '');
+    hint.textContent = '▦ ' + containerSel + ' (' + cnt + ' items)' + (sel.selector_link ? '  🔗 auto' : '');
     fc.innerHTML = fields.map(function(f) {
       var done = !!sel[f.key];
       return '<span class="__tb-f ' + (done ? 'done' : 'pend') + '">' + (done ? '✓' : '○') + ' ' + f.label + '</span>';
@@ -96,37 +109,19 @@ PICKER_SCRIPT = r"""
     window.parent.postMessage({ type: 'rss-picker-cancel' }, '*');
   };
 
-  /* Restore selectors from parent when picker re-opens with existing config */
-  window.addEventListener('message', function(e) {
-    if (!e.data || e.data.type !== 'rss-picker-init' || !e.data.selectors) return;
-    var s = e.data.selectors;
-    var keys = ['selector_item','selector_title','selector_link','selector_description','selector_date','selector_author'];
-    keys.forEach(function(k) { if (s[k]) sel[k] = s[k]; });
-    if (sel.selector_item) {
-      containerSel  = sel.selector_item;
-      /* Recover base by stripping any :not(...) exclusion clauses */
-      containerBase = containerSel.replace(/:not\([^)]*\)/g, '').trim() || containerSel;
-      excludedEls   = [];  // can't recover DOM refs from stored CSS, start fresh
-      try {
-        var els = document.querySelectorAll(containerBase);
-        if (els.length > 0) { container = els[0]; markContainers(); }
-      } catch(e2) {}
-    }
-    refreshTb();
-  });
-
-  /* ── Overlay ── */
-  var ov = document.createElement('div'); ov.id = '__rss_ov';
-  document.body.appendChild(ov);
+  /* ── Show Selections button — toggle on/off ── */
+  document.getElementById('__tb_show').onclick = function() {
+    if (_highlightsShowing) { hideSelections(); } else { showSelections(); }
+  };
 
   /* ── Utilities ── */
   function goodClass(c) {
     return c.length > 1 &&
       !/^(active|hover|focus|open|visible|hidden|show|selected|current|first|last|odd|even|disabled|loading)$/.test(c) &&
-      !/^(is-|has-|js-)/.test(c) && !/\d{3,}/.test(c);
+      !/^(is-|has-|js-)/.test(c) && !/\d{3,}/.test(c) &&
+      !/^__/.test(c);
   }
 
-  /* Absolute selector from document root */
   function absSelector(el, depth) {
     if (!el || el === document.documentElement) return 'html';
     if (el === document.body) return 'body';
@@ -146,7 +141,6 @@ PICKER_SCRIPT = r"""
     return (ps === 'body' || ps === 'html') ? s : ps + ' > ' + s;
   }
 
-  /* Relative selector from base (item container) to el */
   function relSelector(el, base) {
     if (el === base) return null;
     var parts = []; var cur = el;
@@ -164,7 +158,6 @@ PICKER_SCRIPT = r"""
     return parts.length ? parts.join(' > ') : null;
   }
 
-  /* Walk up from el to find the first ancestor that repeats in its parent (≥2 same-tag siblings) */
   function detectContainer(el) {
     var cur = el.parentElement;
     while (cur && cur.parentElement && cur !== document.body) {
@@ -176,34 +169,22 @@ PICKER_SCRIPT = r"""
     return null;
   }
 
-  /*
-   * Generate a GENERAL selector for the item container — one that matches ALL
-   * similar article elements, not just the one clicked.
-   * Unlike absSelector, we never add :nth-of-type here.
-   */
   function containerSelector(el) {
     var tag = el.tagName.toLowerCase();
     var cls = Array.from(el.classList).filter(goodClass).slice(0, 2);
     var sel = tag + (cls.length ? '.' + cls.join('.') : '');
-
-    // If this already matches our element on the page, use it as-is.
-    // Matching multiple elements is exactly what we want for a container selector.
     try {
       var matches = Array.from(document.querySelectorAll(sel));
       if (matches.indexOf(el) >= 0) return sel;
     } catch(e) {}
-
-    // Need one level of parent context to distinguish from other elements.
     var par = el.parentElement;
     if (!par || par === document.body) return sel;
-
     var parTag = par.tagName.toLowerCase();
     var parCls = Array.from(par.classList).filter(goodClass).slice(0, 1);
     var parSel = parTag + (parCls.length ? '.' + parCls[0] : '');
     return parSel + ' > ' + sel;
   }
 
-  /* Auto-detect link: first <a href> in container, returns relative selector */
   function autoLink(base) {
     var links = Array.from(base.querySelectorAll('a[href]'));
     for (var i = 0; i < links.length; i++) {
@@ -215,9 +196,36 @@ PICKER_SCRIPT = r"""
     return null;
   }
 
-  /* isDescendant check */
   function isIn(el, ancestor) {
     var c = el; while (c) { if (c === ancestor) return true; c = c.parentElement; } return false;
+  }
+
+  function getContainerHref(el) {
+    var links = el.querySelectorAll('a[href]');
+    for (var i = 0; i < links.length; i++) {
+      var raw = links[i].getAttribute('href');
+      if (!raw || raw === '#' || /^(javascript:|mailto:|tel:)/.test(raw)) continue;
+      return links[i].href; // browser resolves to absolute URL via <base> tag
+    }
+    return null;
+  }
+
+  function looksLikeArticle(el) {
+    if (el.children.length < 2) return false;
+    var titleEl = el.querySelector('h1,h2,h3,h4,h5,h6');
+    var titleTxt = titleEl ? (titleEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
+    if (!titleTxt) {
+      var anchors = el.querySelectorAll('a');
+      for (var i = 0; i < anchors.length; i++) {
+        var t = (anchors[i].textContent || '').trim();
+        if (t.length > 15) { titleTxt = t; break; }
+      }
+    }
+    if (!titleTxt) return false;
+    var pEl = el.querySelector('p');
+    if (pEl && (pEl.textContent || '').replace(/\s+/g, ' ').trim().length >= 30) return true;
+    var fullTxt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    return fullTxt.replace(titleTxt, '').trim().length >= 50;
   }
 
   /* Highlight all container elements; excluded ones get red .__phx style */
@@ -229,6 +237,9 @@ PICKER_SCRIPT = r"""
     var included = 0;
     try {
       Array.from(document.querySelectorAll(containerBase)).forEach(function(e) {
+        if (excludedEls.indexOf(e) < 0 && manuallyIncluded.indexOf(e) < 0 && !looksLikeArticle(e)) {
+          excludedEls.push(e);
+        }
         if (excludedEls.indexOf(e) >= 0) { e.classList.add('__phx'); }
         else { e.classList.add('__phc'); included++; }
       });
@@ -236,30 +247,132 @@ PICKER_SCRIPT = r"""
     return included;
   }
 
-  /* Recompute containerSel from base + current exclusions and broadcast to parent */
-  function updateContainerSel() {
-    if (excludedEls.length === 0) {
-      containerSel = containerBase;
-    } else {
-      var nths = excludedEls.map(function(el) {
-        var par = el.parentElement;
-        if (!par) return -1;
-        var sibs = Array.from(par.children).filter(function(c) { return c.tagName === el.tagName; });
-        return sibs.indexOf(el) + 1;   // 1-indexed :nth-of-type
-      }).filter(function(n) { return n > 0; });
-      // deduplicate
-      var seen = {};
-      nths = nths.filter(function(n) { return seen[n] ? false : (seen[n] = true); });
-      containerSel = containerBase + nths.map(function(n) {
-        return ':not(:nth-of-type(' + n + '))';
-      }).join('');
+  /* Highlight field elements (title, link, description, date, author) with green */
+  function markFieldSelections() {
+    document.querySelectorAll('.__phf').forEach(function(e) { e.classList.remove('__phf'); });
+    if (!containerBase) return;
+    var keys = ['selector_title', 'selector_link', 'selector_description', 'selector_date', 'selector_author'];
+    try {
+      Array.from(document.querySelectorAll(containerBase)).forEach(function(c) {
+        keys.forEach(function(k) {
+          if (!sel[k]) return;
+          var el = c.querySelector(sel[k]);
+          if (el) el.classList.add('__phf');
+        });
+      });
+    } catch(e2) {}
+  }
+
+  /* Clear all restoration inline styles */
+  function hideSelections() {
+    _restoredEls.forEach(function(el) {
+      el.style.removeProperty('outline');
+      el.style.removeProperty('box-shadow');
+      el.style.removeProperty('opacity');
+      el.style.removeProperty('background-color');
+    });
+    _restoredEls = [];
+    _highlightsShowing = false;
+    var btn = document.getElementById('__tb_show');
+    if (btn) btn.textContent = '◉ Previous Selections';
+  }
+
+  /* Apply saved selections as inline styles.
+     Uses selector_item_excluded hrefs (new format) or falls back to old :not() CSS approach. */
+  function showSelections() {
+    hideSelections();
+    var btn = document.getElementById('__tb_show');
+
+    if (!containerBase) {
+      if (btn) btn.textContent = '⚠ No saved selector';
+      return;
     }
-    sel['selector_item'] = containerSel;
-    window.parent.postMessage({ type: 'rss-picker-field', field: 'selector_item', selector: containerSel }, '*');
+
+    var allContainers = [];
+    try { allContainers = Array.from(document.querySelectorAll(containerBase)); } catch(e) {
+      if (btn) btn.textContent = '⚠ Bad selector: ' + containerBase.slice(0, 30);
+      return;
+    }
+    if (allContainers.length === 0) {
+      if (btn) btn.textContent = '⚠ 0 found: ' + containerBase.slice(0, 40);
+      return;
+    }
+
+    /* Choose exclusion strategy */
+    var isExcluded;
+    if (sel['selector_item_excluded'] !== undefined) {
+      /* New format: excluded by href */
+      var excHrefs = [];
+      try { excHrefs = JSON.parse(sel['selector_item_excluded']); } catch(e) {}
+      var excHrefSet = new Set(excHrefs);
+      isExcluded = function(el) {
+        var href = getContainerHref(el);
+        return href !== null && excHrefSet.has(href);
+      };
+    } else if (_origContainerSel && _origContainerSel !== containerBase) {
+      /* Old format: full :not() selector saved in DB before this fix */
+      var incSet = new Set();
+      try { Array.from(document.querySelectorAll(_origContainerSel)).forEach(function(el) { incSet.add(el); }); } catch(e) {}
+      isExcluded = function(el) { return !incSet.has(el); };
+    } else {
+      isExcluded = function() { return false; };
+    }
+
+    container = allContainers[0];
+    excludedEls = [];
+    manuallyIncluded = [];
+    var fieldKeys = ['selector_title', 'selector_link', 'selector_description', 'selector_date', 'selector_author'];
+
+    allContainers.forEach(function(el) {
+      var excl = isExcluded(el);
+      if (excl) {
+        excludedEls.push(el);
+        el.style.setProperty('outline', '3px dashed #ef4444', 'important');
+        el.style.setProperty('box-shadow', 'inset 0 0 0 3px rgba(239,68,68,0.3)', 'important');
+        el.style.setProperty('opacity', '0.5', 'important');
+      } else {
+        manuallyIncluded.push(el);
+        el.style.setProperty('outline', '3px dashed #8b5cf6', 'important');
+        el.style.setProperty('box-shadow', 'inset 0 0 0 3px rgba(139,92,246,0.15)', 'important');
+      }
+      _restoredEls.push(el);
+
+      if (!excl) {
+        fieldKeys.forEach(function(k) {
+          if (!sel[k]) return;
+          try {
+            var fEl = el.querySelector(sel[k]);
+            if (fEl) {
+              fEl.style.setProperty('outline', '2px solid #22c55e', 'important');
+              fEl.style.setProperty('box-shadow', 'inset 0 0 0 2px rgba(34,197,94,0.25)', 'important');
+              _restoredEls.push(fEl);
+            }
+          } catch(e2) {}
+        });
+      }
+    });
+
+    _highlightsShowing = true;
+    if (btn) btn.textContent = '✕ Hide (' + manuallyIncluded.length + ' selected, ' + excludedEls.length + ' excluded)';
     refreshTb();
   }
 
-  /* Walk up from el to find the nearest ancestor (or self) that is a container element */
+  /* Recompute containerSel from base and broadcast to parent.
+     Exclusions are now stored as link hrefs in selector_item_excluded, not as CSS :not() clauses.
+     This ensures exclusions work consistently between the browser picker (JS-rendered DOM)
+     and the Python extractor (raw HTML, no JS). */
+  function updateContainerSel() {
+    containerSel = containerBase;
+    sel['selector_item'] = containerBase;
+    var excludedHrefs = excludedEls.map(getContainerHref).filter(Boolean);
+    // Deduplicate
+    excludedHrefs = excludedHrefs.filter(function(h, i) { return excludedHrefs.indexOf(h) === i; });
+    sel['selector_item_excluded'] = JSON.stringify(excludedHrefs);
+    window.parent.postMessage({ type: 'rss-picker-field', field: 'selector_item', selector: containerBase }, '*');
+    window.parent.postMessage({ type: 'rss-picker-field', field: 'selector_item_excluded', selector: JSON.stringify(excludedHrefs) }, '*');
+    refreshTb();
+  }
+
   function findContainerEl(el) {
     if (!containerBase) return null;
     var cur = el;
@@ -272,24 +385,20 @@ PICKER_SCRIPT = r"""
     return null;
   }
 
-  /* Assign a field: auto-detect container on first assignment, generate relative selector */
   function assign(key, el) {
     if (key === 'selector_item') {
-      /* Manual container selection — generate a general selector matching ALL similar items */
       container    = el;
       containerBase = containerSelector(el);
       containerSel  = containerBase;
       excludedEls   = [];
+      manuallyIncluded = [];
       sel['selector_item'] = containerSel;
       var lnk = autoLink(el);
       if (lnk) sel['selector_link'] = lnk;
       markContainers();
-      window.parent.postMessage({ type: 'rss-picker-field', field: key, selector: containerSel }, '*');
-      refreshTb();
+      updateContainerSel();
       return;
     }
-
-    /* For other fields: auto-detect container if not yet known */
     if (!container) {
       var c = detectContainer(el);
       if (c) {
@@ -297,27 +406,47 @@ PICKER_SCRIPT = r"""
         containerBase = containerSelector(c);
         containerSel  = containerBase;
         excludedEls   = [];
+        manuallyIncluded = [];
         sel['selector_item'] = containerSel;
         var lnk2 = autoLink(c);
         if (lnk2) sel['selector_link'] = lnk2;
         markContainers();
+        updateContainerSel();
       }
     }
-
-    var s = (container && isIn(el, container))
-            ? (relSelector(el, container) || absSelector(el))
-            : absSelector(el);
+    /* Find whichever container instance actually contains el.
+       This handles multi-container selectors (e.g. 'li.a, li.b') and cases
+       where container points to a different instance than the one clicked. */
+    var activeContainer = container;
+    if (containerBase) {
+      try {
+        var allC = Array.from(document.querySelectorAll(containerBase));
+        for (var ci = 0; ci < allC.length; ci++) {
+          if (isIn(el, allC[ci])) { activeContainer = allC[ci]; break; }
+        }
+      } catch(e2) {}
+    }
+    var s = null;
+    if (activeContainer && isIn(el, activeContainer)) {
+      s = relSelector(el, activeContainer);
+      container = activeContainer; // keep active container in sync
+    }
+    if (!s) return;
     sel[key] = s;
     window.parent.postMessage({ type: 'rss-picker-field', field: key, selector: s }, '*');
+    markFieldSelections();
     refreshTb();
   }
+
+  /* ── Overlay (must exist before elAt / hover handlers reference it) ── */
+  var ov = document.createElement('div'); ov.id = '__rss_ov';
+  document.body.appendChild(ov);
 
   /* ── Smallest element at point ── */
   function elAt(x, y) {
     ov.style.pointerEvents = 'none';
     var all = document.elementsFromPoint ? document.elementsFromPoint(x, y) : [document.elementFromPoint(x, y)];
     ov.style.pointerEvents = 'auto';
-
     var best = null, bestA = Infinity;
     for (var i = 0; i < all.length; i++) {
       var c = all[i];
@@ -327,10 +456,6 @@ PICKER_SCRIPT = r"""
       var a = r.width * r.height;
       if (a > 0 && a < bestA) { bestA = a; best = c; }
     }
-
-    /* elementsFromPoint misses elements whose pointer-events are blocked by an ancestor
-       (e.g. a full-card <a> link sitting on top of a <p> description inside it).
-       Scan ALL descendants of best by bounding-box to find smaller elements at the point. */
     if (best) {
       var rootR = best.getBoundingClientRect();
       bestA = rootR.width * rootR.height;
@@ -347,7 +472,6 @@ PICKER_SCRIPT = r"""
         }
       }
     }
-
     return best;
   }
 
@@ -377,17 +501,15 @@ PICKER_SCRIPT = r"""
     menuX = x; menuY = y; hov = el; el.classList.add('__ph');
 
     var tag = el.tagName.toLowerCase();
-    var cls = Array.from(el.classList).slice(0, 3).join(' ');
+    var cls = Array.from(el.classList).filter(function(c) { return !/^__/.test(c); }).slice(0, 3).join(' ');
     var txt = (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 100);
 
     menu = document.createElement('div'); menu.className = '__pm';
 
-    /* Tag info */
     var info = document.createElement('div'); info.className = '__pm-info';
     info.textContent = '<' + tag + (cls ? ' .' + cls : '') + '>';
     menu.appendChild(info);
 
-    /* Text preview */
     if (txt) {
       var prev = document.createElement('div');
       prev.style.cssText = 'padding:0 10px 8px;font-size:11px;color:#374151;border-bottom:1px solid #f3f4f6;margin-bottom:4px;max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
@@ -396,7 +518,6 @@ PICKER_SCRIPT = r"""
       menu.appendChild(prev);
     }
 
-    /* Navigate */
     var nav = document.createElement('div');
     nav.style.cssText = 'display:flex;gap:4px;padding:0 6px 6px;';
     var hasPar = el.parentElement && el.parentElement !== document.body;
@@ -418,7 +539,11 @@ PICKER_SCRIPT = r"""
     var sep0 = document.createElement('div'); sep0.className = '__pm-sep'; menu.appendChild(sep0);
 
     fields.forEach(function(f) {
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:stretch;';
+
       var btn = document.createElement('button');
+      btn.style.cssText = 'flex:1;text-align:left;';
       btn.textContent = f.icon + '  ' + f.label + (f.req ? '' : ' (optional)');
       if (sel[f.key]) btn.style.color = '#16a34a';
       btn.onclick = function(ev) {
@@ -426,10 +551,29 @@ PICKER_SCRIPT = r"""
         assign(f.key, el);
         closeMenu();
       };
-      menu.appendChild(btn);
+      row.appendChild(btn);
+
+      if (f.key !== 'selector_item' && sel[f.key]) {
+        var clr = document.createElement('button');
+        clr.title = 'Clear ' + f.label;
+        clr.textContent = '✕';
+        clr.style.cssText = 'padding:4px 8px;color:#9ca3af;border-left:1px solid #f3f4f6;flex-shrink:0;font-size:11px;';
+        clr.onmouseenter = function() { clr.style.color = '#ef4444'; clr.style.background = '#fef2f2'; };
+        clr.onmouseleave = function() { clr.style.color = '#9ca3af'; clr.style.background = ''; };
+        clr.onclick = function(ev) {
+          ev.stopPropagation();
+          delete sel[f.key];
+          window.parent.postMessage({ type: 'rss-picker-field', field: f.key, selector: '' }, '*');
+          markFieldSelections();
+          refreshTb();
+          closeMenu();
+        };
+        row.appendChild(clr);
+      }
+
+      menu.appendChild(row);
     });
 
-    /* Exclude / Include this container */
     if (container && containerBase) {
       var cEl = findContainerEl(el);
       if (cEl) {
@@ -442,6 +586,7 @@ PICKER_SCRIPT = r"""
           ev.stopPropagation();
           if (excludedEls.indexOf(cEl) >= 0) {
             excludedEls = excludedEls.filter(function(e) { return e !== cEl; });
+            if (manuallyIncluded.indexOf(cEl) < 0) manuallyIncluded.push(cEl);
           } else {
             excludedEls.push(cEl);
           }
@@ -450,6 +595,29 @@ PICKER_SCRIPT = r"""
           closeMenu();
         };
         menu.appendChild(excBtn);
+      } else {
+        /* Element is outside all current containers — offer to add it as an additional container type */
+        var addSep = document.createElement('div'); addSep.className = '__pm-sep'; menu.appendChild(addSep);
+        var addBtn = document.createElement('button');
+        addBtn.textContent = '▦  Add to Container';
+        addBtn.style.color = '#f97316';
+        addBtn.onclick = function(ev) {
+          ev.stopPropagation();
+          var newSel = containerSelector(el);
+          containerBase = containerBase + ', ' + newSel;
+          /* Switch active container to the new element so subsequent field
+             assignments (title, description, etc.) resolve relative to it */
+          container = el;
+          var lnk = autoLink(el);
+          if (lnk) {
+            sel['selector_link'] = lnk;
+            window.parent.postMessage({ type: 'rss-picker-field', field: 'selector_link', selector: lnk }, '*');
+          }
+          markContainers();
+          updateContainerSel();
+          closeMenu();
+        };
+        menu.appendChild(addBtn);
       }
     }
 
@@ -473,12 +641,46 @@ PICKER_SCRIPT = r"""
   });
 
   document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeMenu(); });
+
+  /* ── Load saved selectors injected by server (window.__RSS_INIT__) ── */
+  (function() {
+    var init = (typeof window.__RSS_INIT__ === 'object' && window.__RSS_INIT__) ? window.__RSS_INIT__ : null;
+    if (!init || !init.selector_item) return;
+
+    var keys = ['selector_item','selector_title','selector_link','selector_description','selector_date','selector_author','selector_item_excluded'];
+    keys.forEach(function(k) { if (init[k] !== undefined) sel[k] = init[k]; });
+
+    _origContainerSel = sel.selector_item; // save original before stripping (may have :not() from old saves)
+    containerBase = sel.selector_item.replace(/:not\([^()]*(?:\([^()]*\)[^()]*)*\)/g, '').trim() || sel.selector_item;
+    containerSel = containerBase;
+
+    document.getElementById('__tb_show').style.display = '';
+    showSelections();
+    refreshTb();
+  })();
+
+  /* Keep accepting rss-picker-init messages too (future-proof fallback) */
+  window.addEventListener('message', function(e) {
+    if (!e.data || e.data.type !== 'rss-picker-init' || !e.data.selectors) return;
+    var s = e.data.selectors;
+    var keys = ['selector_item','selector_title','selector_link','selector_description','selector_date','selector_author','selector_item_excluded'];
+    keys.forEach(function(k) { if (s[k] !== undefined) sel[k] = s[k]; });
+    if (!sel.selector_item) return;
+    _origContainerSel = sel.selector_item;
+    containerBase = sel.selector_item.replace(/:not\([^()]*(?:\([^()]*\)[^()]*)*\)/g, '').trim() || sel.selector_item;
+    containerSel = containerBase;
+    document.getElementById('__tb_show').style.display = '';
+    showSelections();
+    refreshTb();
+  });
+
+  window.parent.postMessage({ type: 'rss-picker-ready' }, '*');
 })();
 </script>
 """
 
 
-def _inject(html: str, base_url: str) -> str:
+def _inject(html: str, base_url: str, init_selectors: dict | None = None) -> str:
     base_tag = f'<base href="{base_url}">\n'
 
     # Strip any X-Frame-Options / CSP meta tags
@@ -495,21 +697,39 @@ def _inject(html: str, base_url: str) -> str:
             html = html.replace(tag, tag + '\n' + base_tag, 1)
             break
 
-    # Inject picker script just before </body> so document.body exists when it runs
+    # Build the script block to inject
+    inject_block = ''
+    if init_selectors:
+        # json.dumps escapes all special chars; replace </ to prevent </script> injection
+        safe_json = json.dumps(init_selectors).replace('</', '<\\/')
+        inject_block = _INIT_SCRIPT.format(init_json=safe_json)
+    inject_block += PICKER_SCRIPT
+
+    # Inject just before </body> so document.body exists when it runs
     for tag in ('</body>', '</Body>', '</BODY>'):
         if tag in html:
-            return html.replace(tag, PICKER_SCRIPT + tag, 1)
+            return html.replace(tag, inject_block + tag, 1)
 
-    return html + PICKER_SCRIPT
+    return html + inject_block
 
 
 @router.get("/api/picker", response_class=HTMLResponse)
-def picker_proxy(url: str = Query(..., description="Page URL to proxy for visual picking")):
+def picker_proxy(
+    url: str = Query(..., description="Page URL to proxy for visual picking"),
+    sel: str = Query(default="", description="JSON-encoded saved selectors to restore"),
+):
     """Fetch a page and inject the RSS visual selector picker script."""
     try:
         result = fetch_page(url, use_playwright=False)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not fetch page: {exc}")
 
-    html = _inject(result.html, result.final_url)
+    init_selectors: dict | None = None
+    if sel:
+        try:
+            init_selectors = json.loads(sel)
+        except Exception:
+            pass
+
+    html = _inject(result.html, result.final_url, init_selectors)
     return HTMLResponse(content=html, headers={"X-Frame-Options": "SAMEORIGIN"})

@@ -21,3 +21,16 @@ htmlcov/
 # IDE
 .vscode/
 .idea/
+
+# Claude local settings
+.claude/settings.local.json
+
+# Debug / temp files
+debug_title.py
+rss_feeds.db
+
+# Frontend
+ui/node_modules/
+ui/package-lock.json
+ui/tsconfig.app.tsbuildinfo
+ui/tsconfig.node.tsbuildinfo

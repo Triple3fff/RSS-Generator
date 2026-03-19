@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from sqlmodel import select
 
 from ..api.deps import SessionDep
@@ -23,14 +23,26 @@ class FeedConfigCreate(BaseModel):
     url: str
     title: str
     description: str = ""
-    selector_item: str
-    selector_title: str
+    # CSS selector fields
+    selector_item: str = ""
+    selector_title: str = ""
     selector_link: str = ""
     selector_link_attr: str = "href"
     selector_description: Optional[str] = None
     selector_date: Optional[str] = None
     selector_author: Optional[str] = None
+    selector_item_excluded: Optional[str] = None
     date_format: Optional[str] = None
+    # XPath fields
+    use_xpath: bool = False
+    xpath_item: Optional[str] = None
+    xpath_title: Optional[str] = None
+    xpath_link: Optional[str] = None
+    xpath_link_attr: str = "href"
+    xpath_description: Optional[str] = None
+    xpath_date: Optional[str] = None
+    xpath_author: Optional[str] = None
+    # Options
     poll_interval_minutes: int = 60
     use_playwright: bool = False
     keep_html: bool = False
@@ -43,11 +55,26 @@ class FeedConfigCreate(BaseModel):
             raise ValueError("slug must contain only lowercase letters, digits, hyphens, and underscores")
         return v
 
+    @model_validator(mode="after")
+    def check_selectors_for_mode(self) -> "FeedConfigCreate":
+        if self.use_xpath:
+            if not self.xpath_item:
+                raise ValueError("xpath_item is required when use_xpath is True")
+            if not self.xpath_title:
+                raise ValueError("xpath_title is required when use_xpath is True")
+        else:
+            if not self.selector_item:
+                raise ValueError("selector_item is required when use_xpath is False")
+            if not self.selector_title:
+                raise ValueError("selector_title is required when use_xpath is False")
+        return self
+
 
 class FeedConfigUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     url: Optional[str] = None
+    # CSS
     selector_item: Optional[str] = None
     selector_title: Optional[str] = None
     selector_link: Optional[str] = None
@@ -55,7 +82,18 @@ class FeedConfigUpdate(BaseModel):
     selector_description: Optional[str] = None
     selector_date: Optional[str] = None
     selector_author: Optional[str] = None
+    selector_item_excluded: Optional[str] = None
     date_format: Optional[str] = None
+    # XPath
+    use_xpath: Optional[bool] = None
+    xpath_item: Optional[str] = None
+    xpath_title: Optional[str] = None
+    xpath_link: Optional[str] = None
+    xpath_link_attr: Optional[str] = None
+    xpath_description: Optional[str] = None
+    xpath_date: Optional[str] = None
+    xpath_author: Optional[str] = None
+    # Options
     poll_interval_minutes: Optional[int] = None
     use_playwright: Optional[bool] = None
     keep_html: Optional[bool] = None
@@ -191,7 +229,8 @@ def _dry_run_scrape(config) -> list[RawItemOut]:
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to fetch page: {exc}")
 
+    meaningful = [i for i in raw_items if i.title or i.link]
     return [
         RawItemOut(title=i.title, link=i.link, description=i.description, pub_date=i.pub_date, author=i.author)
-        for i in raw_items[:3]
+        for i in meaningful[:5]
     ]

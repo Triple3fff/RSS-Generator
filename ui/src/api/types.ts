@@ -4,6 +4,7 @@ export interface FeedConfig {
   url: string
   title: string
   description: string
+  // CSS selectors
   selector_item: string
   selector_title: string
   selector_link: string
@@ -11,7 +12,18 @@ export interface FeedConfig {
   selector_description: string | null
   selector_date: string | null
   selector_author: string | null
+  selector_item_excluded?: string | null
   date_format: string | null
+  // XPath
+  use_xpath: boolean
+  xpath_item: string | null
+  xpath_title: string | null
+  xpath_link: string | null
+  xpath_link_attr: string
+  xpath_description: string | null
+  xpath_date: string | null
+  xpath_author: string | null
+  // Options
   poll_interval_minutes: number
   use_playwright: boolean
   keep_html: boolean
@@ -26,6 +38,7 @@ export interface FeedConfigCreate {
   url: string
   title: string
   description?: string
+  // CSS selectors
   selector_item: string
   selector_title: string
   selector_link: string
@@ -33,7 +46,18 @@ export interface FeedConfigCreate {
   selector_description?: string
   selector_date?: string
   selector_author?: string
+  selector_item_excluded?: string
   date_format?: string
+  // XPath
+  use_xpath?: boolean
+  xpath_item?: string
+  xpath_title?: string
+  xpath_link?: string
+  xpath_link_attr?: string
+  xpath_description?: string
+  xpath_date?: string
+  xpath_author?: string
+  // Options
   poll_interval_minutes?: number
   use_playwright?: boolean
   keep_html?: boolean
@@ -46,6 +70,7 @@ export interface RawItem {
   link: string | null
   description: string | null
   pub_date: string | null
+  author: string | null
 }
 
 export interface CreateFeedResponse {
