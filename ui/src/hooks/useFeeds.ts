@@ -14,6 +14,7 @@ export function useFeed(id: number) {
   return useQuery({
     queryKey: ['feeds', id],
     queryFn: () => feedsApi.get(id),
+    refetchInterval: 30_000,
   })
 }
 
@@ -60,6 +61,8 @@ export function useTriggerScrape(id: number) {
       setTimeout(refresh, 5_000)
       setTimeout(refresh, 15_000)
       setTimeout(refresh, 30_000)
+      setTimeout(refresh, 60_000)
+      setTimeout(refresh, 90_000)
     },
   })
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useLocation, useNavigate } from 'react-router-dom'
 import { RefreshCw, Trash2 } from 'lucide-react'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -38,6 +38,19 @@ export function FeedDetailPage() {
     (location.state as { preview?: RawItem[] })?.preview ?? null,
   )
   const [isPreviewing, setIsPreviewing] = useState(false)
+  const lastScrapedRef = useRef<string | null>(null)
+
+  // Auto-run "Test Selectors" whenever last_scraped_at changes (manual or scheduled scrape)
+  useEffect(() => {
+    if (!feed) return
+    if (feed.last_scraped_at === lastScrapedRef.current) return
+    lastScrapedRef.current = feed.last_scraped_at
+    setIsPreviewing(true)
+    feedsApi.preview(feedId)
+      .then(setPreview)
+      .catch(() => {})
+      .finally(() => setIsPreviewing(false))
+  }, [feed?.last_scraped_at, feedId])
 
   if (isLoading || !feed) {
     return (
@@ -69,6 +82,10 @@ export function FeedDetailPage() {
     }
   }
 
+  const handleScrapeNow = () => {
+    scrapeMutation.mutate()
+  }
+
   const handleDelete = () => {
     deleteMutation.mutate(feedId, {
       onSuccess: () => navigate('/'),
@@ -87,7 +104,7 @@ export function FeedDetailPage() {
               variant="outline"
               size="sm"
               loading={scrapeMutation.isPending}
-              onClick={() => scrapeMutation.mutate()}
+              onClick={handleScrapeNow}
             >
               <RefreshCw className="h-4 w-4" />
               Scrape Now

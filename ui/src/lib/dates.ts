@@ -1,6 +1,14 @@
+function parseUtc(iso: string): Date {
+  // Naive datetime strings from the server (no Z / offset) must be treated as UTC
+  if (!iso.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(iso)) {
+    return new Date(iso + 'Z')
+  }
+  return new Date(iso)
+}
+
 export function formatRelative(iso: string | null): string {
   if (!iso) return 'Never'
-  const date = new Date(iso)
+  const date = parseUtc(iso)
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
   const diffMins = Math.floor(diffMs / 60_000)
@@ -15,5 +23,5 @@ export function formatRelative(iso: string | null): string {
 
 export function formatDateTime(iso: string | null): string {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString()
+  return parseUtc(iso).toLocaleString()
 }

@@ -64,6 +64,17 @@ def scrape_feed(feed_config_id: int) -> None:
         session.add(log)
         session.commit()
 
+        # Prune logs beyond the 20 most recent for this feed
+        all_logs = session.exec(
+            select(ScrapeLog)
+            .where(ScrapeLog.feed_config_id == feed_config_id)
+            .order_by(ScrapeLog.scraped_at.desc())  # type: ignore[arg-type]
+        ).all()
+        for old_log in all_logs[20:]:
+            session.delete(old_log)
+        if all_logs[20:]:
+            session.commit()
+
 
 def register_feed_job(config: FeedConfig) -> None:
     """Add or replace a scheduler job for a FeedConfig."""

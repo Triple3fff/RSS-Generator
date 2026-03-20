@@ -3,20 +3,12 @@ from dataclasses import dataclass
 from datetime import datetime
 
 import requests
-import requests_cache
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from ..config import settings
 
 logger = logging.getLogger(__name__)
-
-# Cache HTTP responses to avoid re-fetching within the same poll window
-requests_cache.install_cache(
-    "data/http_cache",
-    backend="sqlite",
-    expire_after=max(60, settings.default_poll_interval_minutes * 60 - 60),
-)
 
 
 @dataclass
@@ -28,11 +20,7 @@ class FetchResult:
 
 
 def _build_session() -> requests.Session:
-    session = requests_cache.CachedSession(
-        "data/http_cache",
-        backend="sqlite",
-        expire_after=max(60, settings.default_poll_interval_minutes * 60 - 60),
-    )
+    session = requests.Session()
     retry = Retry(
         total=3,
         backoff_factor=1.0,
