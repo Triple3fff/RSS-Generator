@@ -38,6 +38,7 @@ class FeedConfig(SQLModel, table=True):
     use_playwright: bool = Field(default=False, description="Use headless browser for JS-rendered pages")
     keep_html: bool = Field(default=False, description="Preserve HTML tags in description (some readers render it)")
     active: bool = Field(default=True, description="Whether this feed is actively scraped")
+    label: Optional[str] = Field(default=None, description="Optional label for grouping feeds")
 
     # State
     last_scraped_at: Optional[datetime] = Field(default=None)

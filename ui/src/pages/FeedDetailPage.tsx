@@ -60,6 +60,8 @@ export function FeedDetailPage() {
       const items = await feedsApi.preview(feedId)
       setPreview(items)
       qc.setQueryData(['preview', feedId], items)
+      // Also trigger a real scrape so the feed and last_scraped_at are updated
+      scrapeMutation.mutate()
     } catch (err) {
       setPreview([])
     } finally {
@@ -117,15 +119,34 @@ export function FeedDetailPage() {
           )}
         </div>
 
-        {/* Edit form */}
+        {/* Edit form actions + heading */}
         <div>
-          <h2 className="mb-4 text-base font-semibold text-gray-800">Edit Configuration</h2>
-          {updateMutation.isSuccess && (
-            <p className="mb-3 text-sm text-green-600">Changes saved.</p>
+          <div className="mb-4 flex items-center gap-3">
+            <Button type="submit" form="feed-edit-form" loading={updateMutation.isPending}>
+              Save Changes
+            </Button>
+            <Button type="button" variant="outline" onClick={handlePreview} loading={isPreviewing}>
+              Test Selectors
+            </Button>
+            {updateMutation.isSuccess && (
+              <span className="text-sm text-green-600">Changes saved.</span>
+            )}
+          </div>
+
+          {/* Selector preview */}
+          {preview !== null && (
+            <div className="mb-6">
+              <h2 className="mb-3 text-base font-semibold text-gray-800">Selector Preview</h2>
+              <PreviewTable items={preview} />
+            </div>
           )}
+
+          <h2 className="mb-4 text-base font-semibold text-gray-800">Edit Configuration</h2>
           <FeedForm
+            formId="feed-edit-form"
             initialValues={{
               ...feed,
+              label: feed.label ?? undefined,
               selector_description: feed.selector_description ?? undefined,
               selector_date: feed.selector_date ?? undefined,
               selector_author: feed.selector_author ?? undefined,
@@ -146,14 +167,6 @@ export function FeedDetailPage() {
             isPreviewing={isPreviewing}
           />
         </div>
-
-        {/* Selector preview */}
-        {preview !== null && (
-          <div>
-            <h2 className="mb-3 text-base font-semibold text-gray-800">Selector Preview</h2>
-            <PreviewTable items={preview} />
-          </div>
-        )}
 
         {/* Scrape logs */}
         <div>

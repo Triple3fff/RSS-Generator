@@ -1,6 +1,6 @@
 import email.utils
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlparse
 from xml.sax.saxutils import escape
@@ -51,6 +51,7 @@ def build_feed(session: Session, config: FeedConfig) -> bytes:
         if item.title and item.link
     }
     seen_titles: set[str] = set()
+    position = 0  # tracks emit order for synthetic pubDate offsets
 
     for item in items:
         if not item.title and not item.link:
@@ -73,12 +74,20 @@ def build_feed(session: Session, config: FeedConfig) -> bytes:
             parts.append(f"      <description>{_x(item.description)}</description>")
         # guid is a SHA-256 hash, not a URL — isPermaLink must be false
         parts.append(f'      <guid isPermaLink="false">{_x(item.guid)}</guid>')
-        pub = item.pub_date or item.discovered_at
-        parts.append(f"      <pubDate>{_rfc822(_ensure_tz(pub))}</pubDate>")
+        if item.pub_date:
+            pub = _ensure_tz(item.pub_date)
+        else:
+            # Items without a scraped date all share the same discovered_at.
+            # Subtract a small per-position offset so each item gets a unique
+            # pubDate — RSS readers (e.g. Readwise) skip duplicates when all
+            # dates are identical.
+            pub = _ensure_tz(item.discovered_at) - timedelta(seconds=position * 60)
+        parts.append(f"      <pubDate>{_rfc822(pub)}</pubDate>")
         if item.author:
             # RSS 2.0 <author> requires an email; use dc:creator for plain names
             parts.append(f"      <dc:creator>{_x(item.author)}</dc:creator>")
         parts.append("    </item>")
+        position += 1
 
     parts.append("  </channel>")
     parts.append("</rss>")

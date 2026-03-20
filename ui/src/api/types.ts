@@ -28,6 +28,7 @@ export interface FeedConfig {
   use_playwright: boolean
   keep_html: boolean
   active: boolean
+  label: string | null
   last_scraped_at: string | null
   created_at: string
   updated_at: string
@@ -61,9 +62,10 @@ export interface FeedConfigCreate {
   poll_interval_minutes?: number
   use_playwright?: boolean
   keep_html?: boolean
+  label?: string
 }
 
-export type FeedConfigUpdate = Partial<FeedConfigCreate & { active: boolean }>
+export type FeedConfigUpdate = Omit<Partial<FeedConfigCreate & { active: boolean }>, 'label'> & { label?: string | null }
 
 export interface RawItem {
   title: string | null

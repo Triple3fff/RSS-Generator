@@ -16,7 +16,7 @@ interface VisualPickerProps {
   usePlaywright?: boolean
   onComplete: (result: PickerSelectors) => void
   onClose: (partial: PickerSelectors) => void
-  onEnablePlaywright?: () => void
+  onTogglePlaywright?: () => void
 }
 
 const FIELD_LABELS: { key: keyof PickerSelectors; label: string; auto?: boolean }[] = [
@@ -39,7 +39,7 @@ function buildSrc(url: string, initialSelectors?: PickerSelectors, usePlaywright
   return base + `&sel=${encodeURIComponent(JSON.stringify(filled))}`
 }
 
-export function VisualPicker({ url, initialSelectors, usePlaywright, onComplete, onClose, onEnablePlaywright }: VisualPickerProps) {
+export function VisualPicker({ url, initialSelectors, usePlaywright, onComplete, onClose, onTogglePlaywright }: VisualPickerProps) {
   const [selectors, setSelectors] = useState<PickerSelectors>(initialSelectors ?? {})
   const [needsPlaywright, setNeedsPlaywright] = useState(false)
   const selectorsRef = useRef<PickerSelectors>(initialSelectors ?? {})
@@ -93,6 +93,20 @@ export function VisualPicker({ url, initialSelectors, usePlaywright, onComplete,
             <span className="text-gray-500">Click an article element to start</span>
           )}
         </div>
+        {onTogglePlaywright && (
+          <button
+            onClick={onTogglePlaywright}
+            title="Toggle Playwright (headless browser) for JavaScript-rendered pages"
+            className={`shrink-0 flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+              usePlaywright
+                ? 'bg-green-800 text-green-300 hover:bg-green-700'
+                : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+            }`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${usePlaywright ? 'bg-green-400' : 'bg-gray-500'}`} />
+            Playwright
+          </button>
+        )}
       </div>
 
       {/* Instructions */}
@@ -119,9 +133,9 @@ export function VisualPicker({ url, initialSelectors, usePlaywright, onComplete,
             This page appears to be JavaScript-rendered. The content shown may be empty or incomplete.
             Enable <strong>Use Playwright</strong> to load the full page.
           </span>
-          {onEnablePlaywright && (
+          {onTogglePlaywright && (
             <button
-              onClick={onEnablePlaywright}
+              onClick={onTogglePlaywright}
               className="shrink-0 rounded bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-400"
             >
               Enable Playwright

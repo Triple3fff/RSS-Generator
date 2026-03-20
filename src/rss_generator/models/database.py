@@ -32,6 +32,7 @@ def _migrate(engine) -> None:
         "ALTER TABLE feed_configs ADD COLUMN xpath_date TEXT",
         "ALTER TABLE feed_configs ADD COLUMN xpath_author TEXT",
         "ALTER TABLE feed_configs ADD COLUMN selector_item_excluded TEXT",
+        "ALTER TABLE feed_configs ADD COLUMN label TEXT",
     ]
     with engine.connect() as conn:
         for sql in migrations:

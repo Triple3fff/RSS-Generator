@@ -1,12 +1,16 @@
+import email.utils
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
+from xml.sax.saxutils import escape as _xe
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, field_validator, model_validator
 from sqlmodel import select
 
 from ..api.deps import SessionDep
+from ..config import settings
 from ..models.feed import FeedConfig, FeedItem, ScrapeLog
 from ..scheduler.jobs import register_feed_job, remove_feed_job, scrape_feed
 from ..scraper.extractor import extract_items, SelectorMatchError
@@ -46,6 +50,7 @@ class FeedConfigCreate(BaseModel):
     poll_interval_minutes: int = 60
     use_playwright: bool = False
     keep_html: bool = False
+    label: Optional[str] = None
 
     @field_validator("slug")
     @classmethod
@@ -98,6 +103,7 @@ class FeedConfigUpdate(BaseModel):
     use_playwright: Optional[bool] = None
     keep_html: Optional[bool] = None
     active: Optional[bool] = None
+    label: Optional[str] = None
 
 
 class RawItemOut(BaseModel):
@@ -139,6 +145,34 @@ def list_feeds(session: SessionDep):
     return session.exec(select(FeedConfig)).all()
 
 
+@router.get("/opml", response_class=Response)
+def export_opml(session: SessionDep):
+    """Export all active feeds as an OPML 2.0 file."""
+    feeds = session.exec(select(FeedConfig).where(FeedConfig.active == True)).all()  # noqa: E712
+    now = email.utils.format_datetime(datetime.now(tz=timezone.utc))
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<opml version="2.0">',
+        '  <head>',
+        '    <title>RSS Generator Feeds</title>',
+        f'    <dateCreated>{now}</dateCreated>',
+        '  </head>',
+        '  <body>',
+    ]
+    for feed in feeds:
+        xml_url = f"{settings.public_base_url}/feed/{feed.slug}.xml"
+        lines.append(
+            f'    <outline type="rss" text={_xe(feed.title)!r} title={_xe(feed.title)!r}'
+            f' xmlUrl={_xe(xml_url)!r} htmlUrl={_xe(feed.url)!r}/>'
+        )
+    lines += ['  </body>', '</opml>']
+    return Response(
+        content="\n".join(lines).encode("utf-8"),
+        media_type="text/x-opml; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="feeds.opml"'},
+    )
+
+
 @router.get("/{feed_id}")
 def get_feed(feed_id: int, session: SessionDep):
     config = session.get(FeedConfig, feed_id)
@@ -154,7 +188,7 @@ def update_feed(feed_id: int, body: FeedConfigUpdate, session: SessionDep):
     if not config:
         raise HTTPException(status_code=404, detail="Feed not found.")
 
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(config, field, value)
     config.updated_at = datetime.utcnow()
     session.add(config)

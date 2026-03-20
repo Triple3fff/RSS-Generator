@@ -49,8 +49,17 @@ export function useTriggerScrape(id: number) {
   return useMutation({
     mutationFn: () => feedsApi.triggerScrape(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['feeds', id] })
-      qc.invalidateQueries({ queryKey: ['logs', id] })
+      // The scrape runs as a background task — re-fetch at staggered intervals
+      // to pick up the updated last_scraped_at once it completes.
+      const refresh = () => {
+        qc.invalidateQueries({ queryKey: ['feeds'] })
+        qc.invalidateQueries({ queryKey: ['feeds', id] })
+        qc.invalidateQueries({ queryKey: ['logs', id] })
+      }
+      refresh()
+      setTimeout(refresh, 5_000)
+      setTimeout(refresh, 15_000)
+      setTimeout(refresh, 30_000)
     },
   })
 }
