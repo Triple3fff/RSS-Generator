@@ -675,6 +675,26 @@ PICKER_SCRIPT = r"""
   });
 
   window.parent.postMessage({ type: 'rss-picker-ready' }, '*');
+
+  /* ── Playwright detection ──
+     After a short delay (allows any client-side JS to hydrate the DOM),
+     check if the visible page content is suspiciously sparse.
+     Only fires when not already using Playwright (parent checks its own flag). */
+  setTimeout(function() {
+    var spaRoot = document.getElementById('__next') ||
+                  document.getElementById('__nuxt') ||
+                  document.getElementById('root')   ||
+                  document.getElementById('app');
+    if (!spaRoot) return;
+    // Exclude our own toolbar text from the measurement
+    var tb = document.querySelector('.__tb');
+    if (tb) tb.style.visibility = 'hidden';
+    var visibleText = (document.body.innerText || '').replace(/\s+/g, ' ').trim();
+    if (tb) tb.style.visibility = '';
+    if (visibleText.length < 800) {
+      window.parent.postMessage({ type: 'rss-picker-needs-playwright' }, '*');
+    }
+  }, 1500);
 })();
 </script>
 """
@@ -702,7 +722,7 @@ def _inject(html: str, base_url: str, init_selectors: dict | None = None) -> str
     if init_selectors:
         # json.dumps escapes all special chars; replace </ to prevent </script> injection
         safe_json = json.dumps(init_selectors).replace('</', '<\\/')
-        inject_block = _INIT_SCRIPT.format(init_json=safe_json)
+        inject_block += _INIT_SCRIPT.format(init_json=safe_json)
     inject_block += PICKER_SCRIPT
 
     # Inject just before </body> so document.body exists when it runs
@@ -717,10 +737,11 @@ def _inject(html: str, base_url: str, init_selectors: dict | None = None) -> str
 def picker_proxy(
     url: str = Query(..., description="Page URL to proxy for visual picking"),
     sel: str = Query(default="", description="JSON-encoded saved selectors to restore"),
+    use_playwright: bool = Query(default=False, description="Use headless browser to render JS before picking"),
 ):
     """Fetch a page and inject the RSS visual selector picker script."""
     try:
-        result = fetch_page(url, use_playwright=False)
+        result = fetch_page(url, use_playwright=use_playwright)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not fetch page: {exc}")
 

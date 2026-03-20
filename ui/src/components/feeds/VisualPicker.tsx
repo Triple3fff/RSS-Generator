@@ -13,8 +13,10 @@ export interface PickerSelectors {
 interface VisualPickerProps {
   url: string
   initialSelectors?: PickerSelectors
+  usePlaywright?: boolean
   onComplete: (result: PickerSelectors) => void
   onClose: (partial: PickerSelectors) => void
+  onEnablePlaywright?: () => void
 }
 
 const FIELD_LABELS: { key: keyof PickerSelectors; label: string; auto?: boolean }[] = [
@@ -26,8 +28,9 @@ const FIELD_LABELS: { key: keyof PickerSelectors; label: string; auto?: boolean 
   { key: 'selector_author',      label: 'Author' },
 ]
 
-function buildSrc(url: string, initialSelectors?: PickerSelectors): string {
-  const base = `/api/picker?url=${encodeURIComponent(url)}`
+function buildSrc(url: string, initialSelectors?: PickerSelectors, usePlaywright?: boolean): string {
+  let base = `/api/picker?url=${encodeURIComponent(url)}`
+  if (usePlaywright) base += '&use_playwright=true'
   if (!initialSelectors) return base
   const filled = Object.fromEntries(
     Object.entries(initialSelectors).filter(([, v]) => Boolean(v)),
@@ -36,8 +39,9 @@ function buildSrc(url: string, initialSelectors?: PickerSelectors): string {
   return base + `&sel=${encodeURIComponent(JSON.stringify(filled))}`
 }
 
-export function VisualPicker({ url, initialSelectors, onComplete, onClose }: VisualPickerProps) {
+export function VisualPicker({ url, initialSelectors, usePlaywright, onComplete, onClose, onEnablePlaywright }: VisualPickerProps) {
   const [selectors, setSelectors] = useState<PickerSelectors>(initialSelectors ?? {})
+  const [needsPlaywright, setNeedsPlaywright] = useState(false)
   const selectorsRef = useRef<PickerSelectors>(initialSelectors ?? {})
 
   useEffect(() => {
@@ -46,7 +50,9 @@ export function VisualPicker({ url, initialSelectors, onComplete, onClose }: Vis
 
   useEffect(() => {
     function handler(e: MessageEvent) {
-      if (e.data?.type === 'rss-picker-field') {
+      if (e.data?.type === 'rss-picker-needs-playwright') {
+        setNeedsPlaywright(true)
+      } else if (e.data?.type === 'rss-picker-field') {
         const updated = { ...selectorsRef.current }
         if (e.data.selector === '') {
           delete updated[e.data.field as keyof PickerSelectors]
@@ -66,7 +72,7 @@ export function VisualPicker({ url, initialSelectors, onComplete, onClose }: Vis
   }, [onComplete, onClose])
 
   // Selectors are passed via ?sel= param baked into the iframe src — no postMessage needed
-  const src = buildSrc(url, initialSelectors)
+  const src = buildSrc(url, initialSelectors, usePlaywright)
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black/80">
@@ -104,6 +110,25 @@ export function VisualPicker({ url, initialSelectors, onComplete, onClose }: Vis
           </span>
         )}
       </div>
+
+      {/* Playwright warning — shown when the page appears to be JS-rendered */}
+      {needsPlaywright && !usePlaywright && (
+        <div className="shrink-0 flex items-center gap-3 bg-amber-900/80 border-b border-amber-600 px-4 py-2 text-sm text-amber-200">
+          <span className="text-amber-400 text-base">⚠</span>
+          <span className="flex-1">
+            This page appears to be JavaScript-rendered. The content shown may be empty or incomplete.
+            Enable <strong>Use Playwright</strong> to load the full page.
+          </span>
+          {onEnablePlaywright && (
+            <button
+              onClick={onEnablePlaywright}
+              className="shrink-0 rounded bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-400"
+            >
+              Enable Playwright
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Proxied page — selectors are baked into the URL so no postMessage handshake needed */}
       <iframe

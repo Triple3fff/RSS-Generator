@@ -225,8 +225,10 @@ export function FeedForm({
       <VisualPicker
         url={form.url}
         initialSelectors={pickerSelectors}
+        usePlaywright={form.use_playwright}
         onComplete={handlePickerComplete}
         onClose={handlePickerClose}
+        onEnablePlaywright={() => set('use_playwright', true)}
       />
     )}
     <form onSubmit={handleSubmit} className="space-y-8">

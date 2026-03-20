@@ -69,16 +69,37 @@ def _extract_items_css(result: FetchResult, config: FeedConfig) -> list[RawItem]
     items = []
     for container in containers:
         title = _css_text(container, config.selector_title)
+        if config.selector_link:
+            link = _css_link(container, config.selector_link, config.selector_link_attr, result.final_url)
+        else:
+            link = None
+        # If no selector_link or it didn't match, auto-detect link and try anchor text as title hint
+        if link is None:
+            link, _auto_title = _css_auto_link_with_text(container, result.final_url)
+            if title is None:
+                title = _auto_title
+        # Universal fallback: scan all anchors for the first one with non-empty text
         if title is None:
+            _, title = _css_auto_link_with_text(container, result.final_url)
+        # Ancestor fallback: if still no link, check if container itself or a parent is an <a href>
+        # (handles article cards where the outer wrapper <a> contains the entire card)
+        if link is None:
+            cur = container
+            for _ in range(4):
+                if cur.name == "a":
+                    href = str(cur.get("href", "")).strip()
+                    if href and href != "#" and not href.startswith(("javascript:", "mailto:", "tel:")):
+                        link = urljoin(result.final_url, href)
+                        break
+                cur = cur.parent
+                if cur is None or cur.name in ("body", "html", "[document]"):
+                    break
+        if title is None and config.selector_title:
             logger.warning(
                 "selector_title '%s' matched nothing in a container on %s — "
                 "check that the selector is relative to the item container",
                 config.selector_title, result.final_url,
             )
-        if config.selector_link:
-            link = _css_link(container, config.selector_link, config.selector_link_attr, result.final_url)
-        else:
-            link = _css_auto_link(container, result.final_url)
         description = _css_description(container, config.selector_description, config.keep_html)
         pub_date = _css_date(container, config.selector_date, config.date_format)
         author = _css_text(container, config.selector_author) if config.selector_author else None
@@ -110,11 +131,29 @@ def _css_link(container, selector: str, attr: str, base_url: str) -> Optional[st
 
 
 def _css_auto_link(container, base_url: str) -> Optional[str]:
+    url, _ = _css_auto_link_with_text(container, base_url)
+    return url
+
+
+def _css_auto_link_with_text(container, base_url: str) -> tuple[Optional[str], Optional[str]]:
+    """Return (absolute_url, link_text) scanning all valid anchors in the container.
+    URL = first valid anchor; text = first anchor that has non-empty visible text.
+    These may be different elements (e.g. when the first anchor wraps only an image)."""
+    first_url: Optional[str] = None
+    first_text: Optional[str] = None
     for a in container.find_all("a", href=True):
         href = str(a.get("href", "")).strip()
-        if href and href != "#" and not href.startswith(("javascript:", "mailto:", "tel:")):
-            return urljoin(base_url, href)
-    return None
+        if not href or href == "#" or href.startswith(("javascript:", "mailto:", "tel:")):
+            continue
+        if first_url is None:
+            first_url = urljoin(base_url, href)
+        if first_text is None:
+            text = a.get_text(strip=True)
+            if text:
+                first_text = text
+        if first_url and first_text:
+            break
+    return first_url, first_text
 
 
 def _css_description(container, selector: Optional[str], keep_html: bool) -> Optional[str]:
@@ -178,7 +217,26 @@ def _extract_items_xpath(result: FetchResult, config: FeedConfig) -> list[RawIte
         if config.xpath_link:
             link = _xpath_link(container, config.xpath_link, config.xpath_link_attr or "href", result.final_url)
         else:
-            link = _xpath_auto_link(container, result.final_url)
+            link = None
+        if link is None:
+            link, _auto_title = _xpath_auto_link_with_text(container, result.final_url)
+            if title is None:
+                title = _auto_title
+        if title is None:
+            _, title = _xpath_auto_link_with_text(container, result.final_url)
+        # Ancestor fallback: if still no link, check if container itself or a parent is an <a href>
+        if link is None:
+            cur = container
+            for _ in range(4):
+                tag = cur.tag if hasattr(cur, "tag") else None
+                if tag == "a":
+                    href = str(cur.get("href", "")).strip()
+                    if href and href != "#" and not href.startswith(("javascript:", "mailto:", "tel:")):
+                        link = urljoin(result.final_url, href)
+                        break
+                cur = cur.getparent()
+                if cur is None or (hasattr(cur, "tag") and cur.tag in ("body", "html")):
+                    break
         description = _xpath_description(container, config.xpath_description, config.keep_html)
         pub_date = _xpath_date(container, config.xpath_date, config.date_format)
         author = _xpath_text(container, config.xpath_author) if config.xpath_author else None
@@ -219,11 +277,28 @@ def _xpath_link(container, xpath: str, attr: str, base_url: str) -> Optional[str
 
 
 def _xpath_auto_link(container, base_url: str) -> Optional[str]:
+    url, _ = _xpath_auto_link_with_text(container, base_url)
+    return url
+
+
+def _xpath_auto_link_with_text(container, base_url: str) -> tuple[Optional[str], Optional[str]]:
+    """Return (absolute_url, link_text) scanning all valid anchors in the container.
+    URL = first valid anchor; text = first anchor that has non-empty visible text."""
+    first_url: Optional[str] = None
+    first_text: Optional[str] = None
     for a in container.xpath('.//a[@href]'):
         href = str(a.get("href", "")).strip()
-        if href and href != "#" and not href.startswith(("javascript:", "mailto:", "tel:")):
-            return urljoin(base_url, href)
-    return None
+        if not href or href == "#" or href.startswith(("javascript:", "mailto:", "tel:")):
+            continue
+        if first_url is None:
+            first_url = urljoin(base_url, href)
+        if first_text is None:
+            text = a.text_content().strip()
+            if text:
+                first_text = text
+        if first_url and first_text:
+            break
+    return first_url, first_text
 
 
 def _xpath_description(container, xpath: Optional[str], keep_html: bool) -> Optional[str]:
