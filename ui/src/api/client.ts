@@ -8,11 +8,34 @@ export class ApiError extends Error {
   }
 }
 
+export function getToken(): string | null {
+  return localStorage.getItem('auth_token')
+}
+
+export function setToken(token: string): void {
+  localStorage.setItem('auth_token', token)
+}
+
+export function clearToken(): void {
+  localStorage.removeItem('auth_token')
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getToken()
   const res = await fetch(`/api${path}`, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init?.headers,
+    },
     ...init,
   })
+
+  if (res.status === 401) {
+    clearToken()
+    window.location.href = '/login'
+    throw new ApiError(401, 'Unauthorized')
+  }
 
   if (!res.ok) {
     let detail = `HTTP ${res.status}`
@@ -20,7 +43,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       const body = await res.json()
       detail = body.detail ?? JSON.stringify(body)
     } catch {
-      // ignore JSON parse errors
+      // ignore
     }
     throw new ApiError(res.status, detail)
   }

@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -15,6 +15,8 @@ from .scheduler.jobs import scheduler, load_all_jobs
 from .api import feeds as feeds_router
 from .api import serve as serve_router
 from .api import picker as picker_router
+from .api import auth as auth_router
+from .api.auth import verify_token
 
 logging.basicConfig(
     level=logging.INFO,
@@ -70,9 +72,11 @@ async def restrict_external_to_feeds(request: Request, call_next):
         return Response(status_code=404)
     return await call_next(request)
 
-# API routes mounted under /api
-app.include_router(feeds_router.router, prefix="/api")
-app.include_router(picker_router.router)
+# Auth router (public — login endpoint must be unprotected)
+app.include_router(auth_router.router)
+# API routes mounted under /api (protected)
+app.include_router(feeds_router.router, prefix="/api", dependencies=[Depends(verify_token)])
+app.include_router(picker_router.router, dependencies=[Depends(verify_token)])
 # RSS feed URLs stay at root level: /feed/{slug}.xml
 app.include_router(serve_router.router)
 

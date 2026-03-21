@@ -1,6 +1,7 @@
 import re
 from sqlmodel import SQLModel, create_engine, Session, text
 from ..config import settings
+from .auth import AuthConfig  # noqa: F401 — ensures table is registered
 
 # connect_args required for SQLite multi-thread safety with FastAPI
 engine = create_engine(
@@ -20,6 +21,7 @@ def _migrate(engine) -> None:
     """Add new columns to existing tables without dropping data."""
     _clean_picker_classes(engine)
     migrations = [
+        "CREATE TABLE IF NOT EXISTS auth_config (id INTEGER PRIMARY KEY, username TEXT NOT NULL, password_hash TEXT NOT NULL)",
         "ALTER TABLE feed_configs ADD COLUMN selector_author TEXT",
         "ALTER TABLE feed_items ADD COLUMN author TEXT",
         # XPath support
@@ -41,6 +43,18 @@ def _migrate(engine) -> None:
                 conn.commit()
             except Exception:
                 pass  # column already exists
+
+    # Seed default credentials if table is empty
+    with engine.connect() as conn:
+        count = conn.execute(text("SELECT COUNT(*) FROM auth_config")).scalar()
+        if count == 0:
+            from ..api.auth import hash_password
+            password_hash = hash_password("Temporal")
+            conn.execute(
+                text("INSERT INTO auth_config (username, password_hash) VALUES (:username, :password_hash)"),
+                {"username": "Admin", "password_hash": password_hash},
+            )
+            conn.commit()
 
 
 def _clean_picker_classes(engine) -> None:

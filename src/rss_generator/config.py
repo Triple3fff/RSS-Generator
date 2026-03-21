@@ -25,5 +25,7 @@ class Settings(BaseSettings):
     # Public base URL for feed links served to external readers
     public_base_url: str = "http://localhost:8000"
 
+    jwt_secret: str = ""
+
 
 settings = Settings()
