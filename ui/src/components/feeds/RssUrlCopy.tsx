@@ -14,11 +14,21 @@ export function RssUrlCopy({ slug }: { slug: string }) {
 
   const url = getRssUrl(slug, config?.public_base_url)
 
-  const copy = () => {
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url)
+    } catch {
+      // Fallback for HTTP / non-secure contexts (e.g. local Synology access)
+      const el = document.createElement('textarea')
+      el.value = url
+      el.style.cssText = 'position:fixed;opacity:0'
+      document.body.appendChild(el)
+      el.select()
+      document.execCommand('copy')
+      document.body.removeChild(el)
+    }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
   return (
