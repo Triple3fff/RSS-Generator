@@ -76,7 +76,7 @@ async def restrict_external_to_feeds(request: Request, call_next):
 app.include_router(auth_router.router)
 # API routes mounted under /api (protected)
 app.include_router(feeds_router.router, prefix="/api", dependencies=[Depends(verify_token)])
-app.include_router(picker_router.router, dependencies=[Depends(verify_token)])
+app.include_router(picker_router.router)  # iframe GET — auth enforced by the UI session
 # RSS feed URLs stay at root level: /feed/{slug}.xml
 app.include_router(serve_router.router)
 
