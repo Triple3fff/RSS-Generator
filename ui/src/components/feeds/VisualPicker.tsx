@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { XCircle } from 'lucide-react'
 
 export interface PickerSelectors {
   selector_item?: string
@@ -43,6 +44,7 @@ export function VisualPicker({ url, initialSelectors, usePlaywright, onComplete,
   const [selectors, setSelectors] = useState<PickerSelectors>(initialSelectors ?? {})
   const [needsPlaywright, setNeedsPlaywright] = useState(false)
   const selectorsRef = useRef<PickerSelectors>(initialSelectors ?? {})
+  const iframeRef = useRef<HTMLIFrameElement>(null)
 
   useEffect(() => {
     selectorsRef.current = selectors
@@ -93,6 +95,14 @@ export function VisualPicker({ url, initialSelectors, usePlaywright, onComplete,
             <span className="text-gray-500">Click an article element to start</span>
           )}
         </div>
+        <button
+          onClick={() => iframeRef.current?.contentWindow?.postMessage({ type: 'rss-picker-dismiss-popup' }, '*')}
+          title="Dismiss cookie consent popup"
+          className="shrink-0 flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-gray-200"
+        >
+          <XCircle className="h-3.5 w-3.5" />
+          Dismiss Popup
+        </button>
         {onTogglePlaywright && (
           <button
             onClick={onTogglePlaywright}
@@ -146,6 +156,7 @@ export function VisualPicker({ url, initialSelectors, usePlaywright, onComplete,
 
       {/* Proxied page — selectors are baked into the URL so no postMessage handshake needed */}
       <iframe
+        ref={iframeRef}
         src={src}
         className="flex-1 border-0 bg-white"
         sandbox="allow-scripts"

@@ -65,11 +65,45 @@ def _fetch_with_playwright(url: str) -> FetchResult:
             "Playwright is not installed. Run: pip install playwright && playwright install chromium"
         )
 
+    _COOKIE_SELECTORS = [
+        "#onetrust-accept-btn-handler",
+        ".cc-accept", ".cc-btn.cc-allow", ".cc-btn.cc-dismiss",
+        "[aria-label*='accept' i]", "[aria-label*='agree' i]", "[aria-label*='dismiss' i]",
+        "button[id*='accept' i]", "button[id*='agree' i]", "button[id*='cookie' i]",
+        "button[class*='accept' i]", "button[class*='agree' i]",
+        "[data-testid*='accept' i]", "[data-action*='accept' i]",
+    ]
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(user_agent=settings.user_agent)
         page.goto(url, timeout=settings.request_timeout_seconds * 1000)
         page.wait_for_load_state("networkidle")
+
+        # Attempt to dismiss cookie consent popups automatically
+        dismissed = False
+        for sel in _COOKIE_SELECTORS:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible():
+                    el.click()
+                    dismissed = True
+                    break
+            except Exception:
+                pass
+        if not dismissed:
+            # Text-based fallback
+            _ACCEPT_TEXTS = ["accept", "accept all", "agree", "i agree", "ok", "got it",
+                             "allow", "allow all", "allow cookies", "confirm", "continue"]
+            for btn in page.query_selector_all("button, a[role='button']"):
+                try:
+                    text = (btn.inner_text() or "").strip().lower()
+                    if text in _ACCEPT_TEXTS and btn.is_visible():
+                        btn.click()
+                        break
+                except Exception:
+                    pass
+
         html = page.content()
         final_url = page.url
         browser.close()
