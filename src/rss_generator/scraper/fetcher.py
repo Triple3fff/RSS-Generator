@@ -81,10 +81,21 @@ def _fetch_with_playwright(url: str) -> FetchResult:
         page.wait_for_load_state("networkidle")
 
         # Attempt to dismiss cookie consent popups automatically
+        _COOKIE_SELECTORS_EXPANDED = _COOKIE_SELECTORS + [
+            "#CybotCookiebotDialogBodyButtonAccept",
+            "#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll",
+            "#BorlabsCookieBtn--acceptAll",
+            "button[data-borlabs-cookie-accept]",
+            "#cmplz-accept", ".cmplz-accept",
+            "#cn-accept-cookie", ".cn-set-cookie",
+            "#wt-cli-accept-all-btn",
+            "#cookie_action_close_header",
+            ".cli-accept",
+        ]
         dismissed = False
-        for sel in _COOKIE_SELECTORS:
+        for css in _COOKIE_SELECTORS_EXPANDED:
             try:
-                el = page.query_selector(sel)
+                el = page.query_selector(css)
                 if el and el.is_visible():
                     el.click()
                     dismissed = True
@@ -93,12 +104,15 @@ def _fetch_with_playwright(url: str) -> FetchResult:
                 pass
         if not dismissed:
             # Text-based fallback
-            _ACCEPT_TEXTS = ["accept", "accept all", "agree", "i agree", "ok", "got it",
-                             "allow", "allow all", "allow cookies", "confirm", "continue"]
-            for btn in page.query_selector_all("button, a[role='button']"):
+            import re as _re
+            _accept_rx = _re.compile(
+                r'\b(accept all|accept cookies|accept everything|allow all|allow cookies|agree|i agree|ok|got it|confirm|continue)\b',
+                _re.IGNORECASE,
+            )
+            for btn in page.query_selector_all("button, a[role='button'], input[type='button'], input[type='submit']"):
                 try:
-                    text = (btn.inner_text() or "").strip().lower()
-                    if text in _ACCEPT_TEXTS and btn.is_visible():
+                    text = (btn.inner_text() or btn.get_attribute("value") or "").strip()
+                    if _accept_rx.search(text) and btn.is_visible():
                         btn.click()
                         break
                 except Exception:

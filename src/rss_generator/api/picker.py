@@ -676,6 +676,76 @@ PICKER_SCRIPT = r"""
 
   window.parent.postMessage({ type: 'rss-picker-ready' }, '*');
 
+  /* ── Cookie / popup dismiss ──
+     Tries common consent banner selectors, then falls back to button text matching.
+     NOTE: cookie banners are usually position:fixed, so offsetParent is null —
+     use getBoundingClientRect() for the visibility check instead. */
+  function _isVisible(el) {
+    try {
+      var r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) return false;
+      var cs = window.getComputedStyle(el);
+      return cs.display !== 'none' && cs.visibility !== 'hidden' && cs.opacity !== '0';
+    } catch(e) { return false; }
+  }
+
+  function dismissCookiePopup() {
+    var candidates = [
+      // OneTrust
+      '#onetrust-accept-btn-handler',
+      // CookieConsent.js (Insites)
+      '.cc-accept', '.cc-btn.cc-allow', '.cc-btn.cc-dismiss',
+      // Cookiebot
+      '#CybotCookiebotDialogBodyButtonAccept',
+      '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+      // Borlabs Cookie (WordPress)
+      '#BorlabsCookieBtn--acceptAll',
+      'button[data-borlabs-cookie-accept]',
+      // Complianz (WordPress)
+      '#cmplz-accept', '.cmplz-accept',
+      // Cookie Notice & Compliance (WordPress)
+      '#cn-accept-cookie', '.cn-set-cookie',
+      // WP GDPR Cookie Consent
+      '#wt-cli-accept-all-btn', '.wt-cli-accept-all-btn',
+      // Cookie Law Info
+      '#cookie_action_close_header',
+      // GDPR Cookie Compliance
+      '.cli-plugin-main-button', '.cli-accept',
+      // Generic patterns
+      '[aria-label*="accept" i]', '[aria-label*="agree" i]',
+      'button[id*="accept-all" i]', 'button[id*="acceptAll" i]',
+      'button[id*="agree" i]', 'button[id*="cookie" i]',
+      'button[class*="accept-all" i]', 'button[class*="acceptAll" i]',
+      'button[class*="agree" i]',
+      'a[id*="accept" i]', 'a[class*="accept" i]',
+      '[data-testid*="accept" i]', '[data-action*="accept" i]',
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      try {
+        var el = document.querySelector(candidates[i]);
+        if (el && _isVisible(el)) { el.click(); return true; }
+      } catch(e) {}
+    }
+    // Fallback: scan all visible buttons/links for accept-like text
+    var btns = document.querySelectorAll('button, a[role="button"], input[type="button"], input[type="submit"]');
+    var rx = /\b(accept all|accept cookies|accept everything|allow all|allow cookies|agree|i agree|ok|got it|confirm|continue)\b/i;
+    for (var j = 0; j < btns.length; j++) {
+      var b = btns[j];
+      var t = (b.innerText || b.textContent || b.value || '').trim();
+      if (rx.test(t) && _isVisible(b)) { b.click(); return true; }
+    }
+    return false;
+  }
+
+  /* Auto-dismiss on load (fires 800 ms after page is ready) */
+  setTimeout(dismissCookiePopup, 800);
+
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'rss-picker-dismiss-popup') {
+      dismissCookiePopup();
+    }
+  });
+
   /* ── Playwright detection ──
      After a short delay (allows any client-side JS to hydrate the DOM),
      check if the visible page content is suspiciously sparse.
