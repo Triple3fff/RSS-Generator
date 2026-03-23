@@ -4,6 +4,7 @@ import { FeedListPage } from './pages/FeedListPage'
 import { FeedNewPage } from './pages/FeedNewPage'
 import { FeedDetailPage } from './pages/FeedDetailPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { BackupPage } from './pages/BackupPage'
 import { LoginPage } from './pages/LoginPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { useAuth } from './context/AuthContext'
@@ -31,6 +32,7 @@ function ProtectedRoutes() {
         <Route path="/" element={<FeedListPage />} />
         <Route path="/feeds/new" element={<FeedNewPage />} />
         <Route path="/feeds/:id" element={<FeedDetailPage />} />
+        <Route path="/backup" element={<BackupPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

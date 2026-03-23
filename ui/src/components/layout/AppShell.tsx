@@ -1,11 +1,12 @@
 import { Link, useLocation } from 'react-router-dom'
-import { Rss, LayoutDashboard, PlusCircle, Settings, LogOut } from 'lucide-react'
+import { Rss, LayoutDashboard, PlusCircle, Settings, LogOut, HardDriveDownload } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { useAuth } from '../../context/AuthContext'
 
 const nav = [
   { label: 'Feeds', to: '/', icon: LayoutDashboard },
   { label: 'New Feed', to: '/feeds/new', icon: PlusCircle },
+  { label: 'Backup & Restore', to: '/backup', icon: HardDriveDownload },
   { label: 'Settings', to: '/settings', icon: Settings },
 ]
 
