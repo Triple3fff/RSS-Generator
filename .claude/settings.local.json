@@ -1,7 +1,39 @@
 {
   "permissions": {
     "allow": [
-      "Bash(powershell -Command \"node --version; npm --version\" 2>&1)"
+      "Bash(powershell -Command \"node --version; npm --version\" 2>&1)",
+      "Bash(python -c \"from src.rss_generator.scraper.extractor import extract_items, SelectorMatchError; print\\(''extractor OK''\\)\")",
+      "Bash(pip install:*)",
+      "Bash(python -m pytest tests/ -q)",
+      "Bash(python -c \"from src.rss_generator.api.picker import router; print\\(''picker OK''\\)\")",
+      "Bash(npm install:*)",
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(docker compose:*)",
+      "Bash(docker exec:*)",
+      "Bash(npm run:*)",
+      "Bash(python3 -c \":*)",
+      "Bash(python3:*)",
+      "Bash(ls *.bat *.ps1 *.sh *.cmd)",
+      "Bash(curl -s http://localhost:8000/feeds/1/preview)",
+      "Bash(curl -s http://localhost:8000/api/feeds/1/preview)",
+      "Bash(curl -sv http://localhost:8000/feeds/1/preview)",
+      "Bash(docker ps:*)",
+      "Bash(curl -s http://localhost:8000/api/feeds/2/preview)",
+      "Bash(python:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "WebFetch(domain:www.pipedrive.com)",
+      "Bash(docker build:*)",
+      "Bash(curl -s -X POST http://localhost:8000/api/feeds/2/scrape)",
+      "Bash(docker images:*)",
+      "Bash(curl -s \"http://localhost:8000/api/picker?url=https://www.pipedrive.com/es/blog\")",
+      "Bash(grep -E \"^\\\\[final [567]/|DONE $|ERROR\")",
+      "Bash(grep -E \"DONE $|ERROR\")",
+      "Bash(curl -s http://localhost:8000/feed/pipeline-sales-test.xml)",
+      "Bash(curl -s http://localhost:8000/api/feeds/opml)",
+      "Bash(grep -E \"error TS|DONE $|npm run build\")",
+      "Bash(grep -E \"error TS|DONE $\")"
     ]
   }
 }
