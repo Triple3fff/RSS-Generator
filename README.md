@@ -28,10 +28,10 @@ Default credentials on a fresh install: **Admin / Temporal** — change the pass
 ### 2. Add a feed
 
 1. Click **New Feed**.
-2. Paste the URL of the page you want to monitor.
-3. Give the feed a name and optionally a slug (used in the feed URL).
+2. Paste the URL of the page you want to monitor [Click in **Source URL**].
+3. Give the feed a name and optionally a slug (used in the feed URL) [Click in **Title**].
 
-### 3. Pick the CSS selectors
+### 3. Pick the CSS selectors (what you want to convert to RSS in the Web page)
 
 Click **Open Visual Picker**. The target page loads inside the app. Click on:
 
