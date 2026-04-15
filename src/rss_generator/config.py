@@ -1,4 +1,10 @@
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Persistent data directory — survives container restarts on IONOS and similar platforms.
+# Override with the DATA_DIR environment variable; defaults to /data.
+_data_dir = os.environ.get("DATA_DIR", "/data")
 
 
 class Settings(BaseSettings):
@@ -8,8 +14,9 @@ class Settings(BaseSettings):
     server_host: str = "0.0.0.0"
     server_port: int = 8000
 
-    # Database
-    database_url: str = "sqlite:///./data/rss_generator.db"
+    # Database — path is derived from DATA_DIR so data survives restarts.
+    # Override by setting DATABASE_URL explicitly.
+    database_url: str = f"sqlite:///{os.path.join(_data_dir, 'rss_generator.db')}"
 
     # Feed defaults
     default_poll_interval_minutes: int = 60
