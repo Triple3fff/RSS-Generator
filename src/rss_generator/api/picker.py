@@ -747,24 +747,35 @@ PICKER_SCRIPT = r"""
   });
 
   /* ── Playwright detection ──
-     After a short delay (allows any client-side JS to hydrate the DOM),
-     check if the visible page content is suspiciously sparse.
-     Only fires when not already using Playwright (parent checks its own flag). */
-  setTimeout(function() {
+     Check at two points (1.5 s and 4 s) whether the page content looks sparse.
+     The early check catches pure CSR apps that never hydrate; the late check
+     catches SSR shells that pass the character threshold on skeleton/nav text
+     but haven't finished fetching the real article list yet (e.g. Azure blog).
+     Only fires when not already using Playwright. */
+  function _checkNeedsPlaywright() {
     var spaRoot = document.getElementById('__next') ||
                   document.getElementById('__nuxt') ||
                   document.getElementById('root')   ||
                   document.getElementById('app');
-    if (!spaRoot) return;
+    if (!spaRoot) return false;
     // Exclude our own toolbar text from the measurement
     var tb = document.querySelector('.__tb');
     if (tb) tb.style.visibility = 'hidden';
     var visibleText = (document.body.innerText || '').replace(/\s+/g, ' ').trim();
     if (tb) tb.style.visibility = '';
-    if (visibleText.length < 800) {
+    return visibleText.length < 1200;
+  }
+  setTimeout(function() {
+    if (_checkNeedsPlaywright()) {
       window.parent.postMessage({ type: 'rss-picker-needs-playwright' }, '*');
     }
   }, 1500);
+  // Second pass: catches pages whose JS finishes late (lazy hydration, API-driven lists)
+  setTimeout(function() {
+    if (_checkNeedsPlaywright()) {
+      window.parent.postMessage({ type: 'rss-picker-needs-playwright' }, '*');
+    }
+  }, 4000);
 })();
 </script>
 """
@@ -781,7 +792,25 @@ def _inject(html: str, base_url: str, init_selectors: dict | None = None) -> str
         flags=re.IGNORECASE,
     )
 
-    # Inject <base> into <head> so assets resolve correctly
+    # Strip ALL <script> tags from the captured page BEFORE injecting our own.
+    #
+    # Why: Playwright already executed every script and page.content() returns
+    # the fully-rendered DOM — article cards, images, and text are already
+    # present as plain HTML elements.  If we leave the SPA scripts in place the
+    # iframe re-runs React/Next.js hydration, which immediately fires data-fetch
+    # calls back to the origin.  Inside sandbox="allow-scripts" the document
+    # origin is "null", so those calls fail or hang, and many frameworks respond
+    # by replacing the rendered article list with a loading/empty state.
+    # Removing scripts keeps the captured DOM exactly as Playwright saw it;
+    # our picker script (injected below) is the only JavaScript that runs.
+    html = re.sub(
+        r'<script\b[^>]*>.*?</script>',
+        '',
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    # Inject <base> into <head> so relative asset URLs (CSS, images) still resolve.
     for tag in ('<head>', '<Head>', '<HEAD>'):
         if tag in html:
             html = html.replace(tag, tag + '\n' + base_tag, 1)

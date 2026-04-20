@@ -81,15 +81,22 @@ def _extract_items_css(result: FetchResult, config: FeedConfig) -> list[RawItem]
         # Universal fallback: scan all anchors for the first one with non-empty text
         if title is None:
             _, title = _css_auto_link_with_text(container, result.final_url)
-        # Ancestor fallback: if still no link, check if container itself or a parent is an <a href>
-        # (handles article cards where the outer wrapper <a> contains the entire card)
+        # Ancestor fallback: if still no link, check if container itself or a parent
+        # is an <a href> or carries a data-* link attribute.
         if link is None:
             cur = container
             for _ in range(4):
-                if cur.name == "a":
-                    href = str(cur.get("href", "")).strip()
-                    if href and href != "#" and not href.startswith(("javascript:", "mailto:", "tel:")):
-                        link = urljoin(result.final_url, href)
+                if cur.name in ("a", "article", "div", "li", "section"):
+                    # Standard href (only useful on <a>)
+                    if cur.name == "a":
+                        link = _resolve_href(str(cur.get("href", "")), result.final_url)
+                    # data-* fallback on any element
+                    if link is None:
+                        for attr in _DATA_LINK_ATTRS:
+                            link = _resolve_href(str(cur.get(attr, "")), result.final_url)
+                            if link:
+                                break
+                    if link:
                         break
                 cur = cur.parent
                 if cur is None or cur.name in ("body", "html", "[document]"):
@@ -135,24 +142,64 @@ def _css_auto_link(container, base_url: str) -> Optional[str]:
     return url
 
 
+_DATA_LINK_ATTRS = ("data-href", "data-url", "data-link", "data-target")
+
+
+def _resolve_href(raw: str, base_url: str) -> Optional[str]:
+    """Return an absolute URL or None for blank / javascript: / anchor-only hrefs."""
+    raw = raw.strip()
+    if not raw or raw == "#" or raw.startswith(("javascript:", "mailto:", "tel:")):
+        return None
+    return urljoin(base_url, raw)
+
+
 def _css_auto_link_with_text(container, base_url: str) -> tuple[Optional[str], Optional[str]]:
     """Return (absolute_url, link_text) scanning all valid anchors in the container.
     URL = first valid anchor; text = first anchor that has non-empty visible text.
-    These may be different elements (e.g. when the first anchor wraps only an image)."""
+    These may be different elements (e.g. when the first anchor wraps only an image).
+
+    Falls back to data-href / data-url / data-link / data-target attributes on
+    <a> elements (common when href="javascript:void(0)") and then on any element
+    in the container (clickable <div>/<article> cards).
+    """
     first_url: Optional[str] = None
     first_text: Optional[str] = None
-    for a in container.find_all("a", href=True):
+
+    # Pass 1: standard <a href> — also check data-* when href is unusable
+    for a in container.find_all("a"):
         href = str(a.get("href", "")).strip()
-        if not href or href == "#" or href.startswith(("javascript:", "mailto:", "tel:")):
-            continue
-        if first_url is None:
-            first_url = urljoin(base_url, href)
-        if first_text is None:
-            text = a.get_text(strip=True)
-            if text:
-                first_text = text
-        if first_url and first_text:
-            break
+        url = _resolve_href(href, base_url)
+        if url is None:
+            # href is blank or javascript: — try data-* attributes on the same element
+            for attr in _DATA_LINK_ATTRS:
+                val = str(a.get(attr, "")).strip()
+                url = _resolve_href(val, base_url)
+                if url:
+                    break
+        if url:
+            if first_url is None:
+                first_url = url
+            if first_text is None:
+                text = a.get_text(strip=True)
+                if text:
+                    first_text = text
+            if first_url and first_text:
+                break
+
+    # Pass 2: data-* link attributes on any element in the container
+    # (handles clickable <div>/<article>/<li> cards with no <a> child)
+    if first_url is None:
+        for attr in _DATA_LINK_ATTRS:
+            for el in container.find_all(attrs={attr: True}):
+                url = _resolve_href(str(el.get(attr, "")), base_url)
+                if url:
+                    first_url = url
+                    if first_text is None:
+                        first_text = el.get_text(strip=True) or None
+                    break
+            if first_url:
+                break
+
     return first_url, first_text
 
 
@@ -224,16 +271,21 @@ def _extract_items_xpath(result: FetchResult, config: FeedConfig) -> list[RawIte
                 title = _auto_title
         if title is None:
             _, title = _xpath_auto_link_with_text(container, result.final_url)
-        # Ancestor fallback: if still no link, check if container itself or a parent is an <a href>
+        # Ancestor fallback: if still no link, check if container itself or a parent
+        # is an <a href> or carries a data-* link attribute.
         if link is None:
             cur = container
             for _ in range(4):
                 tag = cur.tag if hasattr(cur, "tag") else None
                 if tag == "a":
-                    href = str(cur.get("href", "")).strip()
-                    if href and href != "#" and not href.startswith(("javascript:", "mailto:", "tel:")):
-                        link = urljoin(result.final_url, href)
-                        break
+                    link = _resolve_href(str(cur.get("href", "")), result.final_url)
+                if link is None and tag in ("a", "article", "div", "li", "section"):
+                    for attr in _DATA_LINK_ATTRS:
+                        link = _resolve_href(str(cur.get(attr, "")), result.final_url)
+                        if link:
+                            break
+                if link:
+                    break
                 cur = cur.getparent()
                 if cur is None or (hasattr(cur, "tag") and cur.tag in ("body", "html")):
                     break
@@ -283,21 +335,44 @@ def _xpath_auto_link(container, base_url: str) -> Optional[str]:
 
 def _xpath_auto_link_with_text(container, base_url: str) -> tuple[Optional[str], Optional[str]]:
     """Return (absolute_url, link_text) scanning all valid anchors in the container.
-    URL = first valid anchor; text = first anchor that has non-empty visible text."""
+    URL = first valid anchor; text = first anchor that has non-empty visible text.
+    Falls back to data-href / data-url / data-link / data-target attributes."""
     first_url: Optional[str] = None
     first_text: Optional[str] = None
-    for a in container.xpath('.//a[@href]'):
+
+    # Pass 1: standard <a href> — also check data-* when href is unusable
+    for a in container.xpath('.//a'):
         href = str(a.get("href", "")).strip()
-        if not href or href == "#" or href.startswith(("javascript:", "mailto:", "tel:")):
-            continue
-        if first_url is None:
-            first_url = urljoin(base_url, href)
-        if first_text is None:
-            text = a.text_content().strip()
-            if text:
-                first_text = text
-        if first_url and first_text:
-            break
+        url = _resolve_href(href, base_url)
+        if url is None:
+            for attr in _DATA_LINK_ATTRS:
+                val = str(a.get(attr, "")).strip()
+                url = _resolve_href(val, base_url)
+                if url:
+                    break
+        if url:
+            if first_url is None:
+                first_url = url
+            if first_text is None:
+                text = a.text_content().strip()
+                if text:
+                    first_text = text
+            if first_url and first_text:
+                break
+
+    # Pass 2: data-* on any element
+    if first_url is None:
+        for attr in _DATA_LINK_ATTRS:
+            for el in container.xpath(f'.//*[@{attr}]'):
+                url = _resolve_href(str(el.get(attr, "")), base_url)
+                if url:
+                    first_url = url
+                    if first_text is None:
+                        first_text = el.text_content().strip() or None
+                    break
+            if first_url:
+                break
+
     return first_url, first_text
 
 

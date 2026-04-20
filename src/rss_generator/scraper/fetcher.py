@@ -75,12 +75,30 @@ def _fetch_with_playwright(url: str) -> FetchResult:
     ]
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page(user_agent=settings.user_agent)
+        # Do NOT pass the custom user_agent — sites like Azure check for
+        # non-browser UAs (e.g. "RSSGenerator/1.0") and return empty/restricted
+        # content.  Let Playwright use its bundled Chromium's real UA instead.
+        # Also disable the AutomationControlled feature flag and clear the
+        # navigator.webdriver property so bot-detection CDNs treat the request
+        # as a normal browser visit.
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        context = browser.new_context(
+            viewport={"width": 1440, "height": 900},
+        )
+        context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+        )
+        page = context.new_page()
         page.goto(url, timeout=settings.request_timeout_seconds * 1000)
         page.wait_for_load_state("networkidle")
 
-        # Attempt to dismiss cookie consent popups automatically
+        # ── Step 1: dismiss cookie / consent popups BEFORE scrolling ────────
+        # A consent banner covering the viewport blocks IntersectionObserver
+        # callbacks for anything behind it, so lazy-loaded article cards never
+        # trigger if we scroll first and dismiss second.
         _COOKIE_SELECTORS_EXPANDED = _COOKIE_SELECTORS + [
             "#CybotCookiebotDialogBodyButtonAccept",
             "#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll",
@@ -103,7 +121,6 @@ def _fetch_with_playwright(url: str) -> FetchResult:
             except Exception:
                 pass
         if not dismissed:
-            # Text-based fallback
             import re as _re
             _accept_rx = _re.compile(
                 r'\b(accept all|accept cookies|accept everything|allow all|allow cookies|agree|i agree|ok|got it|confirm|continue)\b',
@@ -118,8 +135,30 @@ def _fetch_with_playwright(url: str) -> FetchResult:
                 except Exception:
                     pass
 
+        # ── Step 2: incremental scroll to trigger lazy / infinite-scroll content
+        # 300 ms per step gives each batch of cards enough time to fetch and
+        # render before we move to the next viewport position.
+        viewport_h = page.evaluate("window.innerHeight") or 900
+        total_h = page.evaluate("document.body.scrollHeight") or 0
+        pos = 0
+        while pos < total_h:
+            pos = min(pos + max(viewport_h // 2, 400), total_h)
+            page.evaluate(f"window.scrollTo(0, {pos})")
+            page.wait_for_timeout(300)
+            new_h = page.evaluate("document.body.scrollHeight") or 0
+            if new_h > total_h:
+                total_h = new_h
+        # Extra pause after reaching the bottom so the last batch can finish rendering
+        page.wait_for_timeout(1500)
+        try:
+            page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            pass  # best-effort — some pages never reach networkidle after scroll
+        page.evaluate("window.scrollTo(0, 0)")  # back to top for the visual selector
+
         html = page.content()
         final_url = page.url
+        context.close()
         browser.close()
 
     return FetchResult(
