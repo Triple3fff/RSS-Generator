@@ -117,6 +117,7 @@ export function FeedListPage() {
                             <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Status</th>
                             <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Last scraped</th>
                             <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Interval</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Items</th>
                             <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Actions</th>
                           </tr>
                         </thead>
@@ -249,6 +250,7 @@ function FeedRow({ feed, allLabels, onDelete }: { feed: FeedConfig; allLabels: s
       </td>
       <td className="px-4 py-3 text-gray-500">{formatRelative(feed.last_scraped_at)}</td>
       <td className="px-4 py-3 text-gray-500">{feed.poll_interval_minutes}m</td>
+      <td className="px-4 py-3 text-right tabular-nums text-gray-500">{feed.item_count}</td>
       <td className="px-4 py-3">
         <div className="flex items-center justify-end gap-1">
           <Button variant="ghost" size="sm" title="Scrape now" loading={scrape.isPending} onClick={() => scrape.mutate()}>
