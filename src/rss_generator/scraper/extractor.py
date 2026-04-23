@@ -200,6 +200,29 @@ def _css_auto_link_with_text(container, base_url: str) -> tuple[Optional[str], O
             if first_url:
                 break
 
+    # Pass 3: cover-link pattern (Webflow, Framer, etc.)
+    # The <a> is positioned absolutely over the card but lives OUTSIDE the content
+    # div — it is a direct child of a common ancestor (e.g. <article>).
+    # Walk up to 6 ancestor levels and check each level's direct <a> children.
+    if first_url is None:
+        cur_parent = container.parent
+        for _ in range(6):
+            if cur_parent is None or getattr(cur_parent, "name", None) in ("body", "html", "[document]"):
+                break
+            for a in cur_parent.find_all("a", recursive=False):
+                href = str(a.get("href", "")).strip()
+                url = _resolve_href(href, base_url)
+                if url:
+                    first_url = url
+                    if first_text is None:
+                        text = a.get_text(strip=True)
+                        if text:
+                            first_text = text
+                    break
+            if first_url:
+                break
+            cur_parent = cur_parent.parent
+
     return first_url, first_text
 
 
@@ -372,6 +395,31 @@ def _xpath_auto_link_with_text(container, base_url: str) -> tuple[Optional[str],
                     break
             if first_url:
                 break
+
+    # Pass 3: cover-link pattern — <a> is a direct child of an ancestor, not
+    # inside the content container (Webflow link-block, Framer cover-link, etc.)
+    if first_url is None:
+        cur_parent = container.getparent()
+        for _ in range(6):
+            if cur_parent is None:
+                break
+            tag = cur_parent.tag if hasattr(cur_parent, "tag") else None
+            if tag in ("body", "html"):
+                break
+            for child in cur_parent:
+                if getattr(child, "tag", None) == "a":
+                    href = str(child.get("href", "")).strip()
+                    url = _resolve_href(href, base_url)
+                    if url:
+                        first_url = url
+                        if first_text is None:
+                            text = child.text_content().strip()
+                            if text:
+                                first_text = text
+                        break
+            if first_url:
+                break
+            cur_parent = cur_parent.getparent()
 
     return first_url, first_text
 
