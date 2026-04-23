@@ -792,22 +792,29 @@ def _inject(html: str, base_url: str, init_selectors: dict | None = None) -> str
         flags=re.IGNORECASE,
     )
 
-    # Strip ALL <script> tags from the captured page BEFORE injecting our own.
+    # Strip EXTERNAL <script src="..."> tags from the captured page.
     #
-    # Why: Playwright already executed every script and page.content() returns
-    # the fully-rendered DOM — article cards, images, and text are already
-    # present as plain HTML elements.  If we leave the SPA scripts in place the
-    # iframe re-runs React/Next.js hydration, which immediately fires data-fetch
-    # calls back to the origin.  Inside sandbox="allow-scripts" the document
-    # origin is "null", so those calls fail or hang, and many frameworks respond
-    # by replacing the rendered article list with a loading/empty state.
-    # Removing scripts keeps the captured DOM exactly as Playwright saw it;
-    # our picker script (injected below) is the only JavaScript that runs.
+    # Why: SPA framework bundles (React, Next.js, Vue, etc.) are loaded via
+    # external <script src> tags.  When the iframe re-runs them they trigger
+    # re-hydration and fire data-fetch calls back to the origin.  Inside
+    # sandbox="allow-scripts" the document origin is "null", so those calls
+    # fail and many frameworks respond by replacing the rendered article list
+    # with a loading/empty state.
+    #
+    # We keep INLINE <script> blocks intentionally.  They typically contain:
+    #   • CSS-in-JS style injections (styled-components, Emotion, Stitches)
+    #   • Theme/dark-mode class setup  (e.g. document.documentElement.className)
+    #   • CSS custom-property definitions
+    # Removing them strips the page of its visual styling, causing colour and
+    # layout regressions (e.g. "all blue" on sites like lavender.ai).
+    # Without the external bundles loaded, any inline React bootstrap code
+    # will fail silently — ReactDOM is never defined — so re-hydration cannot
+    # occur and the server-rendered DOM stays intact.
     html = re.sub(
-        r'<script\b[^>]*>.*?</script>',
+        r'<script\b[^>]+\bsrc=["\'][^"\']*["\'][^>]*/?>(?:\s*</script>)?',
         '',
         html,
-        flags=re.IGNORECASE | re.DOTALL,
+        flags=re.IGNORECASE,
     )
 
     # Inject <base> into <head> so relative asset URLs (CSS, images) still resolve.
@@ -842,7 +849,28 @@ def picker_proxy(
     try:
         result = fetch_page(url, use_playwright=use_playwright)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Could not fetch page: {exc}")
+        # Return an HTML error page so the iframe shows a readable message
+        # instead of a blank white box (which happens when a JSON 502 is loaded).
+        safe_url = url.replace("<", "&lt;").replace(">", "&gt;")
+        safe_err = str(exc).replace("<", "&lt;").replace(">", "&gt;")
+        error_html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;font-family:system-ui,sans-serif;background:#111827;color:#f3f4f6;padding:2rem">
+  <h2 style="color:#f87171;margin-top:0">&#9888; Could not load page</h2>
+  <p style="color:#9ca3af;word-break:break-all">{safe_url}</p>
+  <pre style="background:#1f2937;padding:1rem;border-radius:6px;color:#fca5a5;
+              font-size:12px;white-space:pre-wrap;word-break:break-all">{safe_err}</pre>
+  <p style="color:#6b7280;font-size:13px;line-height:1.6">
+    <strong style="color:#d1d5db">Possible causes:</strong><br>
+    &bull; The site uses Cloudflare or aggressive bot protection &mdash;
+      try opening the URL in a normal browser tab first to solve any CAPTCHA,
+      then retry here.<br>
+    &bull; The page requires JavaScript &mdash; make sure
+      <strong style="color:#d1d5db">Playwright</strong> is enabled.<br>
+    &bull; Network timeout &mdash; the site may be slow or unreachable.
+  </p>
+</body></html>"""
+        return HTMLResponse(content=error_html, status_code=200)
 
     init_selectors: dict | None = None
     if sel:

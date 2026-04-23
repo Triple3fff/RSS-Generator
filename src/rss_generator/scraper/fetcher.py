@@ -87,10 +87,19 @@ def _fetch_with_playwright(url: str) -> FetchResult:
         )
         context = browser.new_context(
             viewport={"width": 1440, "height": 900},
+            locale="en-US",
+            timezone_id="America/New_York",
+            extra_http_headers={
+                "Accept-Language": "en-US,en;q=0.9",
+            },
         )
-        context.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-        )
+        # Patch fingerprint properties checked by Cloudflare and similar CDNs
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver',  {get: () => undefined});
+            Object.defineProperty(navigator, 'plugins',    {get: () => [1,2,3,4,5]});
+            Object.defineProperty(navigator, 'languages',  {get: () => ['en-US','en']});
+            window.chrome = window.chrome || { runtime: {}, loadTimes: function(){}, csi: function(){}, app: {} };
+        """)
         page = context.new_page()
         page.goto(url, timeout=settings.request_timeout_seconds * 1000)
         page.wait_for_load_state("networkidle")
