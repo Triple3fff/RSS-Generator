@@ -737,12 +737,52 @@ PICKER_SCRIPT = r"""
     return false;
   }
 
-  /* Auto-dismiss on load (fires 800 ms after page is ready) */
+  /* ── Overlay / modal removal ──
+     Hides any position:fixed or position:absolute element that covers a large
+     portion of the viewport and has a high z-index.  This catches newsletter
+     sign-up modals, lead-gen popups, and cookie banners that don't match the
+     specific selectors above (e.g. lavender.ai, lemlist, etc.).
+     Also unlocks body scroll in case the page froze it while the modal was open. */
+  function removeOverlays() {
+    var vpW = window.innerWidth  || document.documentElement.clientWidth  || 800;
+    var vpH = window.innerHeight || document.documentElement.clientHeight || 600;
+    var removed = 0;
+    var all = document.querySelectorAll('*');
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      // Never touch our own toolbar or the page skeleton
+      if (!el || el === document.body || el === document.documentElement) continue;
+      if (el.classList && el.classList.contains('__tb')) continue;
+      try {
+        var cs = window.getComputedStyle(el);
+        var pos = cs.position;
+        if (pos !== 'fixed' && pos !== 'absolute') continue;
+        var z = parseInt(cs.zIndex, 10);
+        if (isNaN(z) || z < 10) continue;
+        var r = el.getBoundingClientRect();
+        // Must cover at least 40 % of both viewport dimensions
+        if (r.width < vpW * 0.4 || r.height < vpH * 0.4) continue;
+        el.style.setProperty('display', 'none', 'important');
+        removed++;
+      } catch(e) {}
+    }
+    // Re-enable scrolling that modals typically freeze
+    try { document.body.style.setProperty('overflow', 'auto', 'important'); } catch(e) {}
+    try { document.documentElement.style.setProperty('overflow', 'auto', 'important'); } catch(e) {}
+    return removed;
+  }
+
+  /* Auto-dismiss on load: try cookie banners at 800 ms, then run the overlay
+     sweeper at 1800 ms (after JS-driven modals have had time to appear). */
   setTimeout(dismissCookiePopup, 800);
+  setTimeout(removeOverlays, 1800);
 
   window.addEventListener('message', function(e) {
     if (e.data && e.data.type === 'rss-picker-dismiss-popup') {
-      dismissCookiePopup();
+      var dismissed = dismissCookiePopup();
+      // If no specific banner matched, nuke any large overlay covering the page
+      if (!dismissed) removeOverlays();
+      else removeOverlays();  // run it anyway — belt and braces
     }
   });
 

@@ -159,6 +159,35 @@ def _fetch_with_playwright(url: str) -> FetchResult:
                 total_h = new_h
         # Extra pause after reaching the bottom so the last batch can finish rendering
         page.wait_for_timeout(1500)
+
+        # ── Step 3: dismiss any modals / lead-gen popups triggered by scrolling
+        # Press Escape first (closes most modal dialogs natively), then try
+        # common close-button selectors for newsletter popups that don't respond
+        # to Escape (e.g. lavender.ai, lemlist, etc.).
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(400)
+        except Exception:
+            pass
+        _CLOSE_SELECTORS = [
+            "button[aria-label*='close' i]", "button[aria-label*='dismiss' i]",
+            "[data-testid*='close' i]", "[data-testid*='dismiss' i]",
+            "[class*='modal' i] button[class*='close' i]",
+            "[class*='popup' i] button[class*='close' i]",
+            "[class*='overlay' i] button[class*='close' i]",
+            "[class*='dialog' i] button[class*='close' i]",
+            "button[class*='close' i]", "a[class*='close' i]",
+            "[role='dialog'] button", "[role='alertdialog'] button",
+        ]
+        for css in _CLOSE_SELECTORS:
+            try:
+                el = page.query_selector(css)
+                if el and el.is_visible():
+                    el.click()
+                    page.wait_for_timeout(300)
+                    break
+            except Exception:
+                pass
         try:
             page.wait_for_load_state("networkidle", timeout=8000)
         except Exception:
