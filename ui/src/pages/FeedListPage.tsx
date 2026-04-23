@@ -235,7 +235,17 @@ function FeedRow({ feed, allLabels, onDelete }: { feed: FeedConfig; allLabels: s
       </td>
 
       <td className="px-4 py-3">
-        <FeedStatusBadge feed={feed} />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <FeedStatusBadge feed={feed} />
+          {feed.active && feed.last_scraped_at && feed.item_count === 0 && (
+            <span
+              title="No items found — check your selectors or enable Playwright"
+              className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700"
+            >
+              ⚠ Empty
+            </span>
+          )}
+        </div>
       </td>
       <td className="px-4 py-3 text-gray-500">{formatRelative(feed.last_scraped_at)}</td>
       <td className="px-4 py-3 text-gray-500">{feed.poll_interval_minutes}m</td>

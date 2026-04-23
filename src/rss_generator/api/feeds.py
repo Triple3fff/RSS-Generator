@@ -7,6 +7,7 @@ from xml.sax.saxutils import escape as _xe
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, field_validator, model_validator
+from sqlalchemy import func
 from sqlmodel import select
 
 from ..api.deps import SessionDep
@@ -141,8 +142,20 @@ def create_feed(body: FeedConfigCreate, session: SessionDep, background_tasks: B
 
 @router.get("")
 def list_feeds(session: SessionDep):
-    """List all configured feeds."""
-    return session.exec(select(FeedConfig)).all()
+    """List all configured feeds, including item_count for each."""
+    feeds = session.exec(select(FeedConfig)).all()
+    # Single query: item counts grouped by feed id
+    rows = session.exec(
+        select(FeedItem.feed_config_id, func.count(FeedItem.id).label("cnt"))
+        .group_by(FeedItem.feed_config_id)
+    ).all()
+    counts: dict[int, int] = {feed_id: cnt for feed_id, cnt in rows}
+    result = []
+    for feed in feeds:
+        d = feed.model_dump()
+        d["item_count"] = counts.get(feed.id, 0)
+        result.append(d)
+    return result
 
 
 @router.get("/opml", response_class=Response)

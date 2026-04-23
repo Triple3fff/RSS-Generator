@@ -32,6 +32,7 @@ export interface FeedConfig {
   last_scraped_at: string | null
   created_at: string
   updated_at: string
+  item_count: number
 }
 
 export interface FeedConfigCreate {
