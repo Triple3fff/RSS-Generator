@@ -754,7 +754,8 @@ PICKER_SCRIPT = r"""
       var el = all[i];
       // Never touch our own toolbar or the page skeleton
       if (!el || el === document.body || el === document.documentElement) continue;
-      if (el.classList && el.classList.contains('__tb')) continue;
+      if (el.id === '__rss_ov') continue;                           // our picker overlay
+      if (el.classList && (el.classList.contains('__tb') || el.classList.contains('__pm'))) continue;
       try {
         var cs = window.getComputedStyle(el);
         var pos = cs.position;

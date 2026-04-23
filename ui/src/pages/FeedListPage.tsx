@@ -250,7 +250,17 @@ function FeedRow({ feed, allLabels, onDelete }: { feed: FeedConfig; allLabels: s
       </td>
       <td className="px-4 py-3 text-gray-500">{formatRelative(feed.last_scraped_at)}</td>
       <td className="px-4 py-3 text-gray-500">{feed.poll_interval_minutes}m</td>
-      <td className="px-4 py-3 text-right tabular-nums text-gray-500">{feed.item_count}</td>
+      <td className="px-4 py-3 text-right tabular-nums">
+        <a
+          href={`/feed/${feed.slug}.xml`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open RSS feed"
+          className="tabular-nums text-orange-500 hover:text-orange-700 hover:underline"
+        >
+          {feed.item_count}
+        </a>
+      </td>
       <td className="px-4 py-3">
         <div className="flex items-center justify-end gap-1">
           <Button variant="ghost" size="sm" title="Scrape now" loading={scrape.isPending} onClick={() => scrape.mutate()}>
