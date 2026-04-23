@@ -636,6 +636,8 @@ PICKER_SCRIPT = r"""
   }
 
   ov.addEventListener('click', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
     var el = elAt(e.clientX, e.clientY);
     if (el) showMenu(el, e.clientX, e.clientY);
   });
@@ -857,10 +859,56 @@ def _inject(html: str, base_url: str, init_selectors: dict | None = None) -> str
         flags=re.IGNORECASE,
     )
 
-    # Inject <base> into <head> so relative asset URLs (CSS, images) still resolve.
+    # Navigation blocker — injected at the very top of <head> so it runs before
+    # any inline page script (SPA routers, analytics, etc.).
+    #
+    # Problem: inline scripts kept for CSS-in-JS styling may include capture-phase
+    # click listeners (e.g. Next.js router, GTM, Segment) that intercept any click
+    # and navigate window.location to the href of the nearest <a> ancestor.  When
+    # the user clicks an element in the picker, those listeners fire first and
+    # redirect the iframe away from /api/picker to the real origin — which rejects
+    # the direct iframe load (e.g. "lavender.ai refused to connect").
+    #
+    # Fix: install our own capture-phase listener and history overrides BEFORE any
+    # page script so they win the "first listener wins" race.
+    _NAV_BLOCKER = """\
+<script>
+(function(){
+  /* 1. Kill SPA history-based navigation */
+  try { history.pushState    = function(){}; } catch(e) {}
+  try { history.replaceState = function(){}; } catch(e) {}
+
+  /* 2. Block <a> clicks at capture phase — fires before any page listener */
+  document.addEventListener('click', function(e) {
+    /* Walk up from the clicked element to find the nearest <a> */
+    var n = e.target;
+    while (n && n !== document) {
+      if (n.tagName === 'A' && n.href) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+      n = n.parentNode;
+    }
+  }, true);
+
+  /* 3. Block form submissions */
+  document.addEventListener('submit', function(e) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }, true);
+
+  /* 4. Block window.open */
+  try { window.open = function(){ return null; }; } catch(e) {}
+})();
+</script>
+"""
+
+    # Inject <base> + nav-blocker into <head> so assets resolve and navigation
+    # is suppressed before any inline page script runs.
     for tag in ('<head>', '<Head>', '<HEAD>'):
         if tag in html:
-            html = html.replace(tag, tag + '\n' + base_tag, 1)
+            html = html.replace(tag, tag + '\n' + base_tag + _NAV_BLOCKER, 1)
             break
 
     # Build the script block to inject
