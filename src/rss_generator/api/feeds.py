@@ -50,6 +50,7 @@ class FeedConfigCreate(BaseModel):
     # Options
     poll_interval_minutes: int = 60
     use_playwright: bool = False
+    playwright_wait_seconds: int = 0
     keep_html: bool = False
     label: Optional[str] = None
 
@@ -102,6 +103,7 @@ class FeedConfigUpdate(BaseModel):
     # Options
     poll_interval_minutes: Optional[int] = None
     use_playwright: Optional[bool] = None
+    playwright_wait_seconds: Optional[int] = None
     keep_html: Optional[bool] = None
     active: Optional[bool] = None
     label: Optional[str] = None
@@ -269,7 +271,11 @@ def get_scrape_logs(feed_id: int, session: SessionDep, limit: int = 20):
 def _dry_run_scrape(config) -> list[RawItemOut]:
     """Fetch and extract without persisting. Raises 422 on selector failure."""
     try:
-        result = fetch_page(config.url, use_playwright=config.use_playwright)
+        result = fetch_page(
+            config.url,
+            use_playwright=config.use_playwright,
+            wait_seconds=getattr(config, 'playwright_wait_seconds', 0),
+        )
         raw_items = extract_items(result, config)
     except SelectorMatchError as exc:
         raise HTTPException(status_code=422, detail=str(exc))

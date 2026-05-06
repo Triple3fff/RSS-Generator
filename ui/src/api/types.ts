@@ -26,6 +26,7 @@ export interface FeedConfig {
   // Options
   poll_interval_minutes: number
   use_playwright: boolean
+  playwright_wait_seconds: number
   keep_html: boolean
   active: boolean
   label: string | null
@@ -62,6 +63,7 @@ export interface FeedConfigCreate {
   // Options
   poll_interval_minutes?: number
   use_playwright?: boolean
+  playwright_wait_seconds?: number
   keep_html?: boolean
   label?: string
 }

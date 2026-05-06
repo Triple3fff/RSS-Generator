@@ -4,6 +4,7 @@ from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import HTMLResponse
 
 from ..scraper.fetcher import fetch_page
+from ..config import settings
 
 router = APIRouter(tags=["picker"])
 
@@ -49,7 +50,19 @@ PICKER_SCRIPT = r"""
   .__tb-show   { padding: 4px 10px; background: #065f46; border: 1px solid #059669; border-radius: 5px; color: #6ee7b7; cursor: pointer; font-size: 12px; white-space: nowrap; }
   .__tb-save   { padding: 4px 10px; background: #f97316; border: none; border-radius: 5px; color: #fff; cursor: pointer; font-weight: 600; font-size: 12px; white-space: nowrap; }
   .__tb-cancel { padding: 4px 8px; background: #374151; border: 1px solid #4b5563; border-radius: 5px; color: #fff; cursor: pointer; font-size: 12px; }
-  #__rss_ov { position: fixed; top: 52px; left: 0; right: 0; bottom: 0; z-index: 2147483645; cursor: crosshair; }
+  /* Crosshair cursor over the whole page; restore default inside our own widgets */
+  body { cursor: crosshair !important; }
+  body .__tb, body .__tb *, body .__pm, body .__pm * { cursor: default !important; }
+  body .__pm button { cursor: pointer !important; }
+  /* Override A/B-testing anti-flicker patterns (Intellimize, Optimizely, VWO, Google Optimize).
+     These tools add a class to <html> that hides the entire page while their CDN script loads
+     and applies the test variant.  In the picker iframe the CDN fetch fails (null origin) so
+     the page may stay hidden until the tool's built-in timeout fires (up to 4 s).
+     Our rules have higher specificity than the tool's generic class selectors, so they win. */
+  html.anti-flicker, html.anti-flicker * { visibility: visible !important; opacity: 1 !important; }
+  html.optimizely-force-hide, html.optimizely-force-hide * { visibility: visible !important; opacity: 1 !important; }
+  html.vwo-anti-flicker, html.vwo-anti-flicker * { visibility: visible !important; opacity: 1 !important; }
+  html.async-hide, html.async-hide * { opacity: 1 !important; }
 </style>
 <script id="__rss_picker_script">
 (function() {
@@ -116,10 +129,33 @@ PICKER_SCRIPT = r"""
 
   /* ── Utilities ── */
   function goodClass(c) {
-    return c.length > 1 &&
-      !/^(active|hover|focus|open|visible|hidden|show|selected|current|first|last|odd|even|disabled|loading)$/.test(c) &&
-      !/^(is-|has-|js-)/.test(c) && !/\d{3,}/.test(c) &&
-      !/^__/.test(c);
+    if (c.length <= 1) return false;
+    // State / JS-hook classes
+    if (/^(active|hover|focus|open|visible|hidden|show|selected|current|first|last|odd|even|disabled|loading|mounted|ready|init|initialized)$/.test(c)) return false;
+    if (/^(is-|has-|js-|was-|will-)/.test(c)) return false;
+    // Internal / hash-like
+    if (/^__/.test(c)) return false;
+    if (/\d{3,}/.test(c)) return false;
+    // Tailwind responsive / variant prefixes (contain a colon, e.g. "md:flex", "hover:bg-blue-500")
+    if (c.indexOf(':') >= 0) return false;
+    // Tailwind layout / display utilities
+    if (/^(flex|grid|block|inline|hidden|table|contents|list-item|flow-root)$/.test(c)) return false;
+    if (/^(relative|absolute|fixed|sticky|static)$/.test(c)) return false;
+    if (/^(overflow|truncate|sr-only|not-sr-only|clearfix|float|clear|isolate|isolation)$/.test(c)) return false;
+    // Tailwind utility prefixes — flexbox, grid, sizing, spacing, colour, etc.
+    if (/^(flex-|grid-|col-|row-|gap-|space-|order-|place-)/.test(c)) return false;
+    if (/^(items-|justify-|self-|align-|content-)/.test(c)) return false;
+    if (/^(w-|h-|min-|max-|basis-|aspect-|size-)/.test(c)) return false;
+    if (/^(p-|m-|px-|py-|pl-|pr-|pt-|pb-|mx-|my-|ml-|mr-|mt-|mb-|inset-|top-|right-|bottom-|left-)/.test(c)) return false;
+    if (/^(text-|font-|leading-|tracking-|align-|whitespace-|break-|list-|decoration-|indent-|line-clamp-)/.test(c)) return false;
+    if (/^(bg-|border-|rounded-|shadow-|ring-|divide-|outline-|opacity-|fill-|stroke-|accent-|caret-)/.test(c)) return false;
+    if (/^(transition-|duration-|ease-|delay-|animate-|will-change-)/.test(c)) return false;
+    if (/^(z-|scale-|rotate-|translate-|skew-|transform|origin-)/.test(c)) return false;
+    if (/^(cursor-|select-|resize-|scroll-|snap-|touch-|pointer-|overscroll-)/.test(c)) return false;
+    if (/^(object-|overflow-|float-|clear-)/.test(c)) return false;
+    // Very generic structural names that appear everywhere
+    if (/^(container|wrapper|inner|outer|wrap|content|section|main|header|footer|nav|sidebar|layout|page|app|root|body)$/.test(c)) return false;
+    return true;
   }
 
   function absSelector(el, depth) {
@@ -169,20 +205,72 @@ PICKER_SCRIPT = r"""
     return null;
   }
 
+  function _selCount(s) {
+    try { return document.querySelectorAll(s).length; } catch(e) { return 9999; }
+  }
+
   function containerSelector(el) {
     var tag = el.tagName.toLowerCase();
-    var cls = Array.from(el.classList).filter(goodClass).slice(0, 2);
-    var sel = tag + (cls.length ? '.' + cls.join('.') : '');
-    try {
-      var matches = Array.from(document.querySelectorAll(sel));
-      if (matches.indexOf(el) >= 0) return sel;
-    } catch(e) {}
-    var par = el.parentElement;
-    if (!par || par === document.body) return sel;
-    var parTag = par.tagName.toLowerCase();
-    var parCls = Array.from(par.classList).filter(goodClass).slice(0, 1);
-    var parSel = parTag + (parCls.length ? '.' + parCls[0] : '');
-    return parSel + ' > ' + sel;
+
+    // 1. Prefer data-testid / data-component / data-block — highly specific
+    var dataAttrs = ['data-testid','data-component','data-module','data-block','data-qa','data-id'];
+    for (var di = 0; di < dataAttrs.length; di++) {
+      var dv = el.getAttribute(dataAttrs[di]);
+      if (!dv) continue;
+      var ds = '[' + dataAttrs[di] + '="' + dv.replace(/"/g,'\\"') + '"]';
+      var dc = _selCount(ds);
+      if (dc >= 2 && dc <= 200) return ds;
+    }
+
+    // 2. Tag + good classes, increasing specificity until count is reasonable
+    var allGood = Array.from(el.classList).filter(goodClass);
+    var best = tag + (allGood.length ? '.' + allGood.slice(0,2).join('.') : '');
+    var bestCount = _selCount(best);
+
+    for (var k = 3; k <= allGood.length && bestCount > 50; k++) {
+      var ext = tag + '.' + allGood.slice(0, k).join('.');
+      var ec = _selCount(ext);
+      if (ec >= 2) { best = ext; bestCount = ec; }
+    }
+
+    // 3. If still too broad, anchor to the nearest ancestor with a good selector
+    if (bestCount > 50) {
+      var cur = el.parentElement;
+      var depth = 0;
+      while (cur && cur !== document.body && depth < 4) {
+        var parTag = cur.tagName.toLowerCase();
+
+        // Check ancestor data attrs first
+        for (var pdi = 0; pdi < dataAttrs.length; pdi++) {
+          var pdv = cur.getAttribute(dataAttrs[pdi]);
+          if (!pdv) continue;
+          var pds = '[' + dataAttrs[pdi] + '="' + pdv.replace(/"/g,'\\"') + '"]';
+          var candidate = pds + ' ' + best;
+          var cc = _selCount(candidate);
+          if (cc >= 2 && cc < bestCount) { best = candidate; bestCount = cc; }
+        }
+
+        // Ancestor id
+        if (cur.id && /^[a-zA-Z]/.test(cur.id)) {
+          var idSel = '#' + cur.id + ' ' + best;
+          var ic = _selCount(idSel);
+          if (ic >= 2 && ic < bestCount) { best = idSel; bestCount = ic; }
+        }
+
+        // Ancestor tag + good classes
+        var parGood = Array.from(cur.classList).filter(goodClass).slice(0, 1);
+        if (parGood.length) {
+          var parSel = parTag + '.' + parGood[0];
+          var childSel = parSel + ' > ' + tag + (allGood.length ? '.' + allGood.slice(0,2).join('.') : '');
+          var xc = _selCount(childSel);
+          if (xc >= 2 && xc < bestCount) { best = childSel; bestCount = xc; }
+        }
+
+        cur = cur.parentElement; depth++;
+      }
+    }
+
+    return best;
   }
 
   function autoLink(base) {
@@ -438,56 +526,24 @@ PICKER_SCRIPT = r"""
     refreshTb();
   }
 
-  /* ── Overlay (must exist before elAt / hover handlers reference it) ── */
-  var ov = document.createElement('div'); ov.id = '__rss_ov';
-  document.body.appendChild(ov);
-
-  /* ── Smallest element at point ── */
-  function elAt(x, y) {
-    ov.style.pointerEvents = 'none';
-    var all = document.elementsFromPoint ? document.elementsFromPoint(x, y) : [document.elementFromPoint(x, y)];
-    ov.style.pointerEvents = 'auto';
-    var best = null, bestA = Infinity;
-    for (var i = 0; i < all.length; i++) {
-      var c = all[i];
-      if (!c || c === ov || c === document.body || c === document.documentElement) continue;
-      if (c.closest && (c.closest('.__tb') || c.closest('.__pm'))) continue;
-      var r = c.getBoundingClientRect();
-      var a = r.width * r.height;
-      if (a > 0 && a < bestA) { bestA = a; best = c; }
-    }
-    if (best) {
-      var rootR = best.getBoundingClientRect();
-      bestA = rootR.width * rootR.height;
-      var descendants = best.querySelectorAll('*');
-      for (var j = 0; j < descendants.length; j++) {
-        var bc = descendants[j];
-        if (bc === ov) continue;
-        if (bc.closest && (bc.closest('.__tb') || bc.closest('.__pm'))) continue;
-        var cr = bc.getBoundingClientRect();
-        if (cr.width > 0 && cr.height > 0 &&
-            x >= cr.left && x <= cr.right && y >= cr.top && y <= cr.bottom) {
-          var ca = cr.width * cr.height;
-          if (ca < bestA) { bestA = ca; best = bc; }
-        }
-      }
-    }
-    return best;
-  }
-
-  /* ── Hover ── */
+  /* ── Hover — capture-phase listener on document so it works regardless of
+     the page's z-index stacking or pointer-events CSS ── */
   var hov = null, menu = null, menuX = 0, menuY = 0;
 
-  ov.addEventListener('mousemove', function(e) {
+  document.addEventListener('mouseover', function(e) {
     if (menu) return;
-    var el = elAt(e.clientX, e.clientY);
-    if (!el) return;
+    var el = e.target;
+    if (!el || el === document.body || el === document.documentElement) return;
+    if (el.closest && (el.closest('.__tb') || el.closest('.__pm'))) return;
     if (hov && hov !== el) hov.classList.remove('__ph');
     hov = el; hov.classList.add('__ph');
-  });
-  ov.addEventListener('mouseleave', function() {
-    if (hov) { hov.classList.remove('__ph'); hov = null; }
-  });
+  }, true);
+
+  document.addEventListener('mouseout', function(e) {
+    if (menu) return;
+    var el = e.target;
+    if (el && el === hov && !e.relatedTarget) { hov.classList.remove('__ph'); hov = null; }
+  }, true);
 
   /* ── Menu ── */
   function closeMenu() {
@@ -635,12 +691,16 @@ PICKER_SCRIPT = r"""
     menu.style.top  = Math.max(56, top) + 'px';
   }
 
-  ov.addEventListener('click', function(e) {
+  /* ── Click — capture phase so it fires before any page click handler ── */
+  document.addEventListener('click', function(e) {
+    var el = e.target;
+    if (!el || el === document.body || el === document.documentElement) return;
+    if (el.closest && (el.closest('.__tb') || el.closest('.__pm'))) return;
     e.preventDefault();
     e.stopPropagation();
-    var el = elAt(e.clientX, e.clientY);
-    if (el) showMenu(el, e.clientX, e.clientY);
-  });
+    if (hov) { hov.classList.remove('__ph'); hov = null; }
+    showMenu(el, e.clientX, e.clientY);
+  }, true);
 
   document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeMenu(); });
 
@@ -752,9 +812,8 @@ PICKER_SCRIPT = r"""
     var all = document.querySelectorAll('*');
     for (var i = 0; i < all.length; i++) {
       var el = all[i];
-      // Never touch our own toolbar or the page skeleton
+      // Never touch our own toolbar/menu or the page skeleton
       if (!el || el === document.body || el === document.documentElement) continue;
-      if (el.id === '__rss_ov') continue;                           // our picker overlay
       if (el.classList && (el.classList.contains('__tb') || el.classList.contains('__pm'))) continue;
       try {
         var cs = window.getComputedStyle(el);
@@ -765,6 +824,9 @@ PICKER_SCRIPT = r"""
         var r = el.getBoundingClientRect();
         // Must cover at least 40 % of both viewport dimensions
         if (r.width < vpW * 0.4 || r.height < vpH * 0.4) continue;
+        // Skip scroll containers / layout wrappers that hold significant page content
+        var innerTxt = (el.innerText || '').replace(/\s+/g, ' ').trim();
+        if (innerTxt.length > 200) continue;
         el.style.setProperty('display', 'none', 'important');
         removed++;
       } catch(e) {}
@@ -801,6 +863,14 @@ PICKER_SCRIPT = r"""
                   document.getElementById('root')   ||
                   document.getElementById('app');
     if (!spaRoot) return false;
+
+    // Next.js App Router emits a <template data-dgst="BAILOUT_TO_CLIENT_SIDE_RENDERING">
+    // inside any section whose content is delivered exclusively via the RSC payload.
+    // Without the React runtime those sections render as empty placeholders — the
+    // visual content the user wants to pick is simply not in the DOM.
+    // Playwright is required so React can hydrate and materialise the real elements.
+    if (document.querySelector('[data-dgst="BAILOUT_TO_CLIENT_SIDE_RENDERING"]')) return true;
+
     // Exclude our own toolbar text from the measurement
     var tb = document.querySelector('.__tb');
     if (tb) tb.style.visibility = 'hidden';
@@ -819,12 +889,20 @@ PICKER_SCRIPT = r"""
       window.parent.postMessage({ type: 'rss-picker-needs-playwright' }, '*');
     }
   }, 4000);
+
+  /* If the server silently upgraded a Static request to Playwright (CSR bailout
+     auto-detection), the page shows full content but the parent form still has
+     use_playwright=false.  Signal the parent so it can flip the toggle and ensure
+     the feed config is saved with use_playwright=true. */
+  if (window.__RSS_USED_PLAYWRIGHT__) {
+    window.parent.postMessage({ type: 'rss-picker-auto-playwright' }, '*');
+  }
 })();
 </script>
 """
 
 
-def _inject(html: str, base_url: str, init_selectors: dict | None = None) -> str:
+def _inject(html: str, base_url: str, init_selectors: dict | None = None, playwright_auto_used: bool = False) -> str:
     base_tag = f'<base href="{base_url}">\n'
 
     # Strip any X-Frame-Options / CSP meta tags
@@ -860,6 +938,51 @@ def _inject(html: str, base_url: str, init_selectors: dict | None = None) -> str
         flags=re.IGNORECASE,
     )
 
+    # Strip Next.js App Router RSC (React Server Components) flight-data scripts.
+    #
+    # Why: Next.js 13+ App Router pages embed the RSC payload as thousands of
+    # inline <script> calls: self.__next_f.push([1,"..."]) and
+    # self.__next_s.push([...]).  On content-heavy pages (e.g. gong.io/blog)
+    # these can total 10–15 MB, inflating the proxied HTML enormously and
+    # making the iframe slow or unresponsive.  The payload is only consumed by
+    # the Next.js client runtime — which we've already stripped — so removing
+    # these scripts has no visual effect.  The server-rendered HTML nodes that
+    # make the page visible are in the regular <div>/<article> tree, not here.
+    html = re.sub(
+        r'<script[^>]*>\s*(?:self\.__next_[a-zA-Z_]+=self\.__next_[a-zA-Z_]+\|\|\[\])?'
+        r'\s*self\.__next_[a-zA-Z_]+\.push\([\s\S]*?</script>',
+        '',
+        html,
+        flags=re.IGNORECASE,
+    )
+
+    # Replace Next.js CSR bailout sections with a visible placeholder.
+    #
+    # Next.js App Router wraps client-side-only components in a Suspense
+    # boundary marked <!--$!-->...<!--/$-->.  When the component cannot be
+    # rendered on the server it emits:
+    #   <template data-dgst="BAILOUT_TO_CLIENT_SIDE_RENDERING"></template>
+    #   <div class="min-h-screen"></div>          ← full-viewport empty block
+    # Without the React runtime the section is entirely invisible to the user,
+    # and the placeholder's min-h-screen class makes the whole iframe look blank.
+    # We replace the entire boundary with a small informative banner so the user
+    # knows they need Playwright rather than seeing a white void.
+    _CSR_PLACEHOLDER = (
+        '<div style="padding:0.6rem 1rem;margin:0.25rem 0;background:#1a2233;'
+        'border-radius:6px;border:1px dashed #374151;color:#6b7280;'
+        'font-family:system-ui,sans-serif;font-size:12px;text-align:center">'
+        '&#9889; This section is dynamically rendered &mdash; enable '
+        '<strong style="color:#f97316">Playwright</strong> in the toolbar to load it'
+        '</div>'
+    )
+    html = re.sub(
+        r'<!--\$!-->\s*<template[^>]+BAILOUT_TO_CLIENT_SIDE_RENDERING[^>]*>'
+        r'</template>[\s\S]*?<!--/\$-->',
+        _CSR_PLACEHOLDER,
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
     # Navigation blocker — injected at the very top of <head> so it runs before
     # any inline page script (SPA routers, analytics, etc.).
     #
@@ -879,16 +1002,13 @@ def _inject(html: str, base_url: str, init_selectors: dict | None = None) -> str
   try { history.pushState    = function(){}; } catch(e) {}
   try { history.replaceState = function(){}; } catch(e) {}
 
-  /* 2. Block <a> clicks at capture phase — fires before any page listener */
+  /* 2. Block <a> navigation at capture phase.  Only preventDefault — no
+     stopImmediatePropagation — so the picker's own capture listener still
+     receives the click and can show the context menu. */
   document.addEventListener('click', function(e) {
-    /* Walk up from the clicked element to find the nearest <a> */
     var n = e.target;
     while (n && n !== document) {
-      if (n.tagName === 'A' && n.href) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        return;
-      }
+      if (n.tagName === 'A' && n.href) { e.preventDefault(); return; }
       n = n.parentNode;
     }
   }, true);
@@ -901,15 +1021,43 @@ def _inject(html: str, base_url: str, init_selectors: dict | None = None) -> str
 
   /* 4. Block window.open */
   try { window.open = function(){ return null; }; } catch(e) {}
+
+  /* 5. Block dynamically-created external scripts (A/B testing, analytics CDNs).
+     Inline scripts that call document.createElement('script') then set src to
+     an external URL (e.g. Intellimize, Optimizely snippets) bypass our static
+     <script src> stripping.  We intercept createElement so that any <script>
+     element it returns has a no-op src setter for external URLs, and we also
+     patch setAttribute on the returned element so setAttribute('src','https://...')
+     is equally blocked.  This prevents A/B testing scripts from loading their
+     CDN bundles, which avoids page-replacement side-effects and anti-flicker hangs. */
+  (function() {
+    var _dce = document.createElement.bind(document);
+    document.createElement = function(tag) {
+      var el = _dce.apply(this, arguments);
+      if (typeof tag === 'string' && tag.toLowerCase() === 'script') {
+        var _origSetAttr = el.setAttribute.bind(el);
+        el.setAttribute = function(name, value) {
+          if (name.toLowerCase() === 'src' && value && /^https?:/i.test(value)) return;
+          _origSetAttr(name, value);
+        };
+        Object.defineProperty(el, 'src', {
+          configurable: true,
+          get: function() { return el.getAttribute('src') || ''; },
+          set: function(v) { el.setAttribute('src', v); }
+        });
+      }
+      return el;
+    };
+  })();
 })();
 </script>
 """
 
-    # Inject <base> + nav-blocker into <head> so assets resolve and navigation
-    # is suppressed before any inline page script runs.
+    # Inject <base> + nav-blocker (+ optional playwright flag) into <head>.
+    _playwright_flag = '<script>window.__RSS_USED_PLAYWRIGHT__=true;</script>\n' if playwright_auto_used else ''
     for tag in ('<head>', '<Head>', '<HEAD>'):
         if tag in html:
-            html = html.replace(tag, tag + '\n' + base_tag + _NAV_BLOCKER, 1)
+            html = html.replace(tag, tag + '\n' + base_tag + _NAV_BLOCKER + _playwright_flag, 1)
             break
 
     # Build the script block to inject
@@ -933,10 +1081,26 @@ def picker_proxy(
     url: str = Query(..., description="Page URL to proxy for visual picking"),
     sel: str = Query(default="", description="JSON-encoded saved selectors to restore"),
     use_playwright: bool = Query(default=False, description="Use headless browser to render JS before picking"),
+    wait_seconds: int = Query(default=0, ge=0, le=120, description="Extra seconds to wait after page load (Dynamic mode)"),
 ):
     """Fetch a page and inject the RSS visual selector picker script."""
+    playwright_auto_used = False
     try:
-        result = fetch_page(url, use_playwright=use_playwright)
+        result = fetch_page(url, use_playwright=use_playwright, wait_seconds=wait_seconds)
+        # Auto-upgrade to Playwright when the static fetch returns a Next.js
+        # CSR bailout section and Playwright is available.  We track this so the
+        # injected page can signal the parent frame to flip use_playwright=true,
+        # ensuring the saved feed config also uses Playwright for scraping.
+        if (
+            not use_playwright
+            and settings.playwright_enabled
+            and 'BAILOUT_TO_CLIENT_SIDE_RENDERING' in result.html
+        ):
+            try:
+                result = fetch_page(url, use_playwright=True, wait_seconds=wait_seconds)
+                playwright_auto_used = True
+            except Exception:
+                pass  # fall back to the original static result
     except Exception as exc:
         # Return an HTML error page so the iframe shows a readable message
         # instead of a blank white box (which happens when a JSON 502 is loaded).
@@ -968,5 +1132,5 @@ def picker_proxy(
         except Exception:
             pass
 
-    html = _inject(result.html, result.final_url, init_selectors)
+    html = _inject(result.html, result.final_url, init_selectors, playwright_auto_used=playwright_auto_used)
     return HTMLResponse(content=html, headers={"X-Frame-Options": "SAMEORIGIN"})

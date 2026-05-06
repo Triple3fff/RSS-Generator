@@ -34,11 +34,11 @@ def _build_session() -> requests.Session:
     return session
 
 
-def fetch_page(url: str, use_playwright: bool = False) -> FetchResult:
+def fetch_page(url: str, use_playwright: bool = False, wait_seconds: int = 0) -> FetchResult:
     """Fetch a web page and return its HTML content."""
     if use_playwright and settings.playwright_enabled:
         try:
-            return _fetch_with_playwright(url)
+            return _fetch_with_playwright(url, wait_seconds=wait_seconds)
         except RuntimeError as exc:
             logger.warning("Playwright unavailable (%s), falling back to requests for %s", exc, url)
     return _fetch_with_requests(url)
@@ -57,7 +57,7 @@ def _fetch_with_requests(url: str) -> FetchResult:
     )
 
 
-def _fetch_with_playwright(url: str) -> FetchResult:
+def _fetch_with_playwright(url: str, wait_seconds: int = 0) -> FetchResult:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -103,6 +103,11 @@ def _fetch_with_playwright(url: str) -> FetchResult:
         page = context.new_page()
         page.goto(url, timeout=settings.request_timeout_seconds * 1000)
         page.wait_for_load_state("networkidle")
+
+        # Extra configurable wait after networkidle — lets API-driven or lazily
+        # hydrated content finish rendering before we interact with the page.
+        if wait_seconds > 0:
+            page.wait_for_timeout(wait_seconds * 1000)
 
         # ── Step 1: dismiss cookie / consent popups BEFORE scrolling ────────
         # A consent banner covering the viewport blocks IntersectionObserver

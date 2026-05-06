@@ -35,6 +35,7 @@ def _migrate(engine) -> None:
         "ALTER TABLE feed_configs ADD COLUMN xpath_author TEXT",
         "ALTER TABLE feed_configs ADD COLUMN selector_item_excluded TEXT",
         "ALTER TABLE feed_configs ADD COLUMN label TEXT",
+        "ALTER TABLE feed_configs ADD COLUMN playwright_wait_seconds INTEGER NOT NULL DEFAULT 0",
     ]
     with engine.connect() as conn:
         for sql in migrations:

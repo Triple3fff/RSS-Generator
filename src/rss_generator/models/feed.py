@@ -36,6 +36,7 @@ class FeedConfig(SQLModel, table=True):
     # Scraping options
     poll_interval_minutes: int = Field(default=60, description="How often to scrape this page (minutes)")
     use_playwright: bool = Field(default=False, description="Use headless browser for JS-rendered pages")
+    playwright_wait_seconds: int = Field(default=0, description="Extra seconds to wait after page load before capturing (Dynamic mode only)")
     keep_html: bool = Field(default=False, description="Preserve HTML tags in description (some readers render it)")
     active: bool = Field(default=True, description="Whether this feed is actively scraped")
     label: Optional[str] = Field(default=None, description="Optional label for grouping feeds")
